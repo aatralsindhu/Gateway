@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Gateways - IH Gateway{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="ih-card shadow-sm border-0">
+        <div class="card-header bg-white border-0 px-4 py-3 d-flex justify-content-between align-items-center">
+            <h4 class="mb-0 fw-bold text-primary">
+                <i class="bi bi-hdd-network me-2"></i> Gateways
+            </h4>
+            <a href="{% url 'add_gateway' %}" class="btn btn-primary fw-semibold shadow-sm">
+                <i class="bi bi-plus-circle me-1"></i> Add Gateway
+            </a>
+        </div>
+        <div class="table-responsive">
+            <table class="table align-middle table-hover mb-0" id="gateway-table">
+                <thead class="bg-light text-muted">
+                    <tr>
+                        <th class="fw-semibold">Name</th>
+                        <th class="fw-semibold">Status</th>
+                        <th class="fw-semibold">Created</th>
+                        <th class="fw-semibold">Connectors (Up / Dn)</th>
+                        <th class="text-end fw-semibold">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="gateway-table-body">
+                {% for gateway in gateways %}
+                    <tr class="gateway-row" data-id="{{ gateway.id }}">
+                        <td class="fw-semibold text-dark">{{ gateway.name }}</td>
+                        <td>
+                            <span class="badge rounded-pill {% if gateway.status == 'active' %}bg-success-subtle text-success{% else %}bg-secondary-subtle text-secondary{% endif %} px-3 py-2">
+                                {{ gateway.get_status_display }}
+                            </span>
+                        </td>
+                        <td class="text-muted small">{{ gateway.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            <span class="badge rounded-pill bg-info-subtle text-info px-3">{{ gateway.inbound_connectors.count }}</span>
+                            /
+                            <span class="badge rounded-pill bg-warning-subtle text-warning px-3">{{ gateway.outbound_connectors.count }}</span>
+                        </td>
+                        <td class="text-end">
+                            <a href="{% url 'edit_gateway' gateway.id %}" class="btn btn-sm btn-outline-primary me-1 edit-btn">
+                                <i class="bi bi-pencil-square"></i>
+                            </a>
+                            <button class="btn btn-sm btn-outline-danger delete-gateway-btn">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-5">
+                            <i class="bi bi-exclamation-circle me-2"></i>No gateways found.
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    document.querySelectorAll(".gateway-row").forEach(function(row) {
+        row.addEventListener("click", function(e) {
+            if (!e.target.closest(".edit-btn") && !e.target.closest(".delete-gateway-btn")) {
+                window.location.href = `/gateway/${row.dataset.id}/`;
+            }
+        });
+    });
+
+    document.querySelectorAll(".delete-gateway-btn").forEach(function(button) {
+        button.addEventListener("click", function(event) {
+            event.stopPropagation();
+            const row = button.closest("tr");
+            const gatewayId = row.dataset.id;
+
+            if (!confirm("Are you sure you want to delete this gateway?")) return;
+
+            fetch(`/gateway/${gatewayId}/delete/`, {
+                method: "POST",
+                headers: { "X-CSRFToken": "{{ csrf_token }}" }
+            })
+            .then(response => {
+                if (response.ok) row.remove();
+                else alert("Error deleting gateway.");
+            })
+            .catch(error => console.error("Error:", error));
+        });
+    });
+});
+</script>
+
+<style>
+/* Smooth table hover */
+.gateway-row {
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.1s ease;
+}
+.gateway-row:hover {
+    background-color: #f8faff;
+    transform: scale(1.002);
+}
+
+/* Badge styling */
+.bg-success-subtle { background-color: #d1f7e2 !important; }
+.bg-warning-subtle { background-color: #fff4d6 !important; }
+.bg-info-subtle    { background-color: #d6f2ff !important; }
+.bg-secondary-subtle { background-color: #e7e7e7 !important; }
+
+.text-success { color: #198754 !important; }
+.text-warning { color: #f0ad4e !important; }
+.text-info    { color: #0dcaf0 !important; }
+.text-secondary { color: #6c757d !important; }
+
+/* Buttons */
+.btn {
+    transition: all 0.2s ease;
+}
+.btn-outline-danger:hover {
+    background-color: #dc3545;
+    color: white !important;
+}
+.btn-outline-primary:hover {
+    background-color: #0d6efd;
+    color: white !important;
+}
+</style>
+{% endblock %}

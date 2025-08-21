@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Connector Configuration{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card mt-4">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">{{ connector.name }} Configuration</h4>
+            </div>
+            <div class="card-body">
+                <ul class="nav nav-tabs mb-3" id="configTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="basic-tab" data-bs-toggle="tab" data-bs-target="#basic" type="button" role="tab">Basic</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced" type="button" role="tab">Advanced</button>
+                    </li>
+                </ul>
+                <div class="tab-content" id="configTabContent">
+                    <div class="tab-pane fade show active" id="basic" role="tabpanel">
+                        {% if timeseries_list %}
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Scale</th>
+                                    <th>Address</th>
+                                    <th>Byte Order</th>
+                                    <th>Data Type</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ts in timeseries_list %}
+                                <tr>
+                                    <td>{{ ts.name }}</td>
+                                    <td>{{ ts.scale }}</td>
+                                    <td>{{ ts.address }}</td>
+                                    <td>{{ ts.byte_order }}</td>
+                                    <td>{{ ts.data_type }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                        <a href="{% url 'add_timeseries' connector.id %}" class="btn btn-primary">Add Timeseries</a>
+                        {% else %}
+                        <a href="{% url 'add_timeseries' connector.id %}" class="btn btn-primary">Add Timeseries</a>
+                        {% endif %}
+                    </div>
+                    <div class="tab-pane fade" id="advanced" role="tabpanel">
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label class="form-label">Configuration (JSON)</label>
+                                <textarea name="configuration" class="form-control" rows="6">{{ connector.configuration }}</textarea>
+                            </div>
+                            <button type="submit" class="btn btn-success">Save Advanced</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

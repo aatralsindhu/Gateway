@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container">
+    <h2>Edit Configuration for {{ connector.name }}</h2>
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label for="config" class="form-label">Config</label>
+            <textarea class="form-control" id="config" name="config" rows="15">{{ connector.config }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-success">Save</button>
+        <a href="{% url 'connector_detail' connector.id %}" class="btn btn-secondary ms-2">Cancel</a>
+    </form>
+</div>
+{% endblock %}

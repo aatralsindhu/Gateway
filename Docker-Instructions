@@ -1,0 +1,17 @@
+Build the Image
+docker build -t ih_gateway:latest .
+
+Run Locally
+docker run -p 8000:8000 ih_gateway:latest
+
+Push to Docker Hub
+docker tag ih_gateway:latest sindhu812/ih_gateway:latest
+docker push sindhu812/ih_gateway:latest
+
+Pull and Run:
+docker pull sindhu812/ih_gateway:latest
+docker run -p 8000:8000 sindhu812/ih_gateway:latest
+
+
+
+

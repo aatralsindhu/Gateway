@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Add {{ direction }} Connector - IH Gateway{% endblock %}
+
+{% block content %}
+<style>
+/* ====== Add Connector Page Styles ====== */
+.ih-card {
+    max-width: 600px;
+    margin: 2rem auto;
+    background: #ffffff;
+    border-radius: 1rem;
+    padding: 2rem;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+}
+
+.ih-card h3 {
+    font-weight: 700;
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+.ih-card p {
+    color: #6b7280;
+}
+
+form p {
+    margin-bottom: 1.25rem;
+}
+
+form label {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    display: block;
+}
+
+form input, 
+form select, 
+form textarea {
+    border-radius: 0.5rem;
+    border: 1px solid #d1d5db;
+    padding: 0.5rem 0.75rem;
+    width: 100%;
+    transition: border-color 0.2s ease;
+}
+
+form input:focus, 
+form select:focus, 
+form textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+}
+
+.btn {
+    border-radius: 0.5rem;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background-color: #3b82f6;
+    border: none;
+}
+
+.btn-primary:hover {
+    background-color: #2563eb;
+}
+
+.btn-secondary {
+    background-color: #6b7280;
+    border: none;
+}
+
+.btn-secondary:hover {
+    background-color: #4b5563;
+}
+</style>
+
+<div class="ih-card">
+    <h3>Add {{ direction|title }} Connector</h3>
+    <p class="mb-4">Adding to <strong>{{ gateway.name }}</strong></p>
+
+    <form method="post" novalidate>
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="mt-3">
+            <button type="submit" class="btn btn-primary">Add Connector</button>
+            <a href="{% url 'gateway_detail' gateway.id %}" class="btn btn-secondary ms-2">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

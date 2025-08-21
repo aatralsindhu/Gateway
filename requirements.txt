@@ -1,0 +1,6 @@
+Django>=4.2
+gunicorn
+pymodbus
+paho-mqtt
+psycopg2-binary  # if using PostgreSQL
+whitenoise

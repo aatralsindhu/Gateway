@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}MQTT Configuration - {{ connector.name }}{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card mt-4">
+            <div class="card-header bg-info text-white">
+                <h4 class="mb-0">MQTT Configuration: {{ connector.name }}</h4>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data" id="mqtt-config-form">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Broker Address</label>
+                        <input type="text" class="form-control" name="broker" placeholder="e.g., mqtt.example.com" value="{{ config.broker|default_if_none:'' }}" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Broker Port</label>
+                        <input type="number" class="form-control" name="port" placeholder="1883" value="{{ config.port|default_if_none:''|default:1883 }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Username</label>
+                        <input type="text" class="form-control" name="username" placeholder="MQTT username" value="{{ config.username|default_if_none:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Password</label>
+                        <input type="password" class="form-control" name="password" placeholder="MQTT password" value="{{ config.password|default_if_none:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Topic</label>
+                        <input type="text" class="form-control" name="topic" placeholder="e.g., v1/devices/me/telemetry" value="{{ config.topic|default_if_none:'' }}">
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck" {% if config.tls %}checked{% endif %}>
+                        <label class="form-check-label" for="tlsCheck">Enable TLS/SSL</label>
+                    </div>
+                    <div id="tls-files-section" style="display: {% if config.tls %}block{% else %}none{% endif %}; margin-bottom:16px;">
+                        <div class="mb-3">
+                            <label class="form-label">CA Certificate File</label>
+                            <input type="file" class="form-control" name="ca_cert" accept=".crt,.pem">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Client Certificate File</label>
+                            <input type="file" class="form-control" name="client_cert" accept=".crt,.pem">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Private Key File</label>
+                            <input type="file" class="form-control" name="private_key" accept=".key,.pem">
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-info w-100">Save Configuration</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Simple JS to toggle file inputs -->
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const tlsCheck = document.getElementById('tlsCheck');
+    const tlsFilesSection = document.getElementById('tls-files-section');
+    tlsCheck.addEventListener('change', function() {
+        tlsFilesSection.style.display = this.checked ? "block" : "none";
+    });
+});
+</script>
+{% endblock %}
+

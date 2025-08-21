@@ -1,0 +1,187 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}IH Gateway{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --brand-main: #0056b3;
+            --brand-secondary: #2673c7;
+            --brand-accent: #49c4e5;
+            --sidebar-bg: linear-gradient(180deg, #0056b3 0%, #003d7a 100%);
+            --sidebar-active: #2673c7;
+            --main-bg: #f4f6fb;
+        }
+        body { background: var(--main-bg); }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 0; left: 0;
+            height: 100vh; width: 242px;
+            background: var(--sidebar-bg);
+            color: #edf0fa;
+            padding-top: 60px;
+            box-shadow: 2px 0 22px rgba(60,40,120,0.11);
+            backdrop-filter: blur(3px);
+            border-right: 1px solid rgba(38,86,179,0.15);
+        }
+        .sidebar .navbar-brand {
+            font-weight: 800;
+            letter-spacing: 1.6px;
+            color: #fff;
+            font-size: 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .sidebar .navbar-brand div {
+            display: flex; align-items: center; gap: 7px;
+        }
+        .company-logo {
+            width: 45px; height: 45px;
+            border-radius: 50%;
+            background: #e6f0fb;
+            padding: 1px;
+            box-shadow: 0 0 12px rgba(0, 86, 179, 0.5);
+        }
+        .navbar-brand span {
+            font-family: 'Segoe UI', sans-serif;
+            font-weight: 800;
+            color: #dadbdd;
+            letter-spacing: 1.8px;
+            font-size: 2.3rem;
+        }
+        .navbar-brand small {
+            font-size: 0.75rem;
+            color: #c7d9f1;
+            font-style: italic;
+        }
+
+        /* Sidebar Links */
+        .sidebar .nav-link {
+            color: #e4e7f7;
+            font-weight: 500;
+            margin-bottom: 12px;
+            border-radius: 8px;
+            padding: 12px 20px;
+            font-size: 1.08rem;
+            display: flex; align-items: center; gap: 12px;
+            position: relative;
+            transition: background 0.22s, color 0.18s, box-shadow 0.18s;
+        }
+        .sidebar .nav-link i {
+            font-size: 1.33rem;
+            color: var(--brand-accent);
+            transition: color 0.18s;
+        }
+        .sidebar .nav-link.active,
+        .sidebar .nav-link:hover {
+            background: var(--sidebar-active);
+            color: #fff;
+            box-shadow: 0 4px 18px rgba(38, 86, 179, 0.35);
+        }
+        .sidebar .nav-link.active i,
+        .sidebar .nav-link:hover i {
+            color: #fff;
+        }
+        .sidebar .nav-link.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 5px;
+            height: 76%;
+            width: 4px;
+            border-radius: 3px;
+            background: #fff;
+            box-shadow: 0 0 8px var(--brand-accent);
+        }
+
+        /* Main Content */
+        .main-content {
+            margin-left: 272px;
+            padding: 40px 32px;
+            min-height: 100vh;
+            background: var(--main-bg);
+        }
+        .navbar {
+            margin-left: 242px;
+            border-bottom: 1px solid #e3e3e3;
+            background: #fff;
+            box-shadow: 0 1.5px 12px rgba(49,50,150,0.04);
+        }
+        .navbar-text {
+            font-size: 1.27rem;
+            font-weight: 700;
+            color: var(--brand-main) !important;
+        }
+
+        /* Card */
+        .ih-card {
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 2px 18px #2519551a;
+            padding: 32px 24px;
+            margin-bottom: 34px;
+            border: 1.5px solid #eef0fa;
+            transition: box-shadow 0.2s, transform 0.14s;
+        }
+        .ih-card:hover { box-shadow: 0 8px 28px #49c4e52a; transform: translateY(-2px) scale(1.01); }
+        .ih-card-title { font-weight: 700; color: #251955; font-size: 1.33rem; }
+
+        @media (max-width: 991px) {
+            .sidebar { position: static; width: 100%; padding-top: 0; }
+            .main-content, .navbar { margin-left: 0 !important; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar p-3">
+        <a class="navbar-brand mb-4" href="{% url 'gateway_list' %}">
+            <div>
+                <img src="{% static 'logo.jpg' %}" alt="Aattral Logo" class="company-logo" />
+                <span>Aattrax</span>
+            </div>
+            <small>Powered by Aattral</small>
+        </a>
+        <nav class="nav flex-column w-100">
+            <a class="nav-link {% if request.resolver_match.url_name == 'gateway_list' %}active{% endif %}" href="{% url 'gateway_list' %}">
+                <i class="bi bi-hdd-network"></i> Gateways
+            </a>
+            <a class="nav-link {% if request.resolver_match.url_name == 'monitor' %}active{% endif %}" href="{% url 'monitor' %}">
+                <i class="bi bi-speedometer2"></i> Monitor
+            </a>
+        </nav>
+    </div>
+
+    <!-- Top Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-light shadow-sm">
+        <div class="container-fluid">
+            <span class="navbar-text ms-auto text-primary fw-bold">
+                {% if request.user.is_authenticated %}
+                    <i class="bi bi-person-circle"></i> {{ request.user.username }}
+                {% endif %}
+            </span>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        {% block content %}
+            <div class="ih-card">
+                <div class="ih-card-title">
+                    Welcome to <span class="text-primary">IH Gateway Platform</span>
+                </div>
+                <div class="mt-2 text-muted">
+                    Manage and monitor your device gateways with a modern, secure, and user-friendly dashboard.
+                </div>
+            </div>
+        {% endblock %}
+    </div>
+</body>
+</html>

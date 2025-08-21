@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Monitor — IH Gateway Dashboard{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<style>
+.monitor-hero {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:1rem;
+  margin-bottom:1.25rem;
+}
+.page-title { font-weight:800; color:var(--brand-main,#0d6efd); letter-spacing:0.3px; }
+.kpi-card { border-radius:12px; background:#fff; padding:1rem; box-shadow:0 6px 18px rgba(18,38,63,0.06); }
+.kpi-title { font-size:0.85rem; color:#6b7280; }
+.kpi-value { font-weight:700; font-size:1.35rem; color:#111827; }
+.table-wrap { margin-top:1rem; }
+.timestamp { color:#6b7280; font-size:0.85rem; }
+.badge-status-active { background:linear-gradient(90deg,#22c55e,#16a34a); color:#fff; padding:0.35rem 0.6rem; border-radius:8px; font-weight:600; }
+.badge-status-inactive { background:#94a3b8; color:#fff; padding:0.35rem 0.6rem; border-radius:8px; font-weight:600; }
+.small-muted { color:#6b7280; font-size:0.85rem; }
+.empty-state { text-align:center; padding:2.25rem; color:#6b7280; background:#fbfdff; border-radius:10px; border:1px dashed #e6eefb; }
+.filter-row { gap: .75rem; }
+@media (max-width: 767px) {
+  .monitor-hero { flex-direction:column; align-items:flex-start; gap: .75rem; }
+  .controls { width:100%; display:flex; flex-wrap:wrap; gap:.5rem; }
+}
+</style>
+
+<div class="container-fluid">
+  <div class="monitor-hero">
+    <div>
+      <div class="page-title">Monitor</div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <div class="me-2 small-muted timestamp" id="lastUpdated">Last update: —</div>
+      <button id="btnRefresh" class="btn btn-outline-primary btn-sm">
+        Refresh
+      </button>
+      <button id="btnExport" class="btn btn-primary btn-sm">
+        Export CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="kpi-card">
+        <div class="kpi-title">Gateways</div>
+        <div class="kpi-value" id="kpiGateways">—</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="kpi-card">
+        <div class="kpi-title">Devices</div>
+        <div class="kpi-value" id="kpiDevices">—</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="kpi-card">
+        <div class="kpi-title">Active Devices</div>
+        <div class="kpi-value" id="kpiActiveDevices">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="row mb-3">
+    <div class="col-12">
+      <div class="d-flex controls filter-row align-items-center">
+        <select id="filterGateway" class="form-select" required>
+          <option value="">Select Gateway...</option>
+        </select>
+        <select id="filterDevice" class="form-select">
+          <option value="">All Devices</option>
+        </select>
+        <input id="filterSearch" class="form-control" placeholder="Search key/value..." style="min-width:220px;">
+        <select id="filterLimit" class="form-select" style="width:120px;">
+          <option value="25">25 rows</option>
+          <option value="50" selected>50 rows</option>
+          <option value="100">100 rows</option>
+        </select>
+        <div class="ms-auto d-flex gap-2">
+          <div class="form-check form-switch align-self-center">
+            <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
+            <label class="form-check-label small-muted" for="autoRefresh">Auto-refresh</label>
+          </div>
+          <input id="refreshInterval" type="number" min="3" value="10" class="form-control form-control-sm" style="width:80px;" title="seconds">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <div id="tableContainer" class="table-responsive">
+      <table class="table table-hover table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+           
+            <th>Device</th>
+            <th>Key</th>
+            <th>Value</th>
+           
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody id="monitorRows">
+          <tr><td colspan="6"><div class="empty-state">Loading data…</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_FILTERS = '/api/monitor/filters/';
+const API_DATA = '/api/monitor/data/';
+const API_CSV = '/api/monitor/csv/';
+let autoRefreshTimer = null;
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+async function loadFilters() {
+  const res = await fetch(API_FILTERS);
+  const payload = await res.json();
+  populateSelect('filterGateway', payload.gateways, 'id', 'name');
+  populateSelect('filterDevice', payload.devices, 'device_name', 'device_name', true);
+  if (payload.meta) {
+    document.getElementById('kpiGateways').innerText = payload.meta.gateways || payload.gateways.length;
+    document.getElementById('kpiDevices').innerText = payload.meta.devices || payload.devices.length;
+    document.getElementById('kpiActiveDevices').innerText = payload.meta.active_devices ?? '—';
+  }
+  // Auto-select first gateway and load data
+  if (payload.gateways.length > 0) {
+    const firstGatewayId = payload.gateways[0].id;
+    document.getElementById('filterGateway').value = firstGatewayId;
+    await loadDevicesForGateway();
+    await loadData();
+  }
+}
+
+function populateSelect(id, arr, valueKey, labelKey, includeAll=false) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = '';
+  if (includeAll) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.text = 'All Devices';
+    sel.appendChild(opt);
+  }
+  arr.forEach(item => {
+    const opt = document.createElement('option');
+    opt.value = item[valueKey];
+    opt.text = item[labelKey];
+    sel.appendChild(opt);
+  });
+}
+
+
+function renderRows(flatData) {
+  const tbody = document.getElementById('monitorRows');
+  if (!flatData.length) {
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No data to display.</div></td></tr>`;
+    return;
+  }
+
+  // Group by device_name
+  const grouped = flatData.reduce((acc, item) => {
+    if (!acc[item.device_name]) {
+      acc[item.device_name] = [];
+    }
+    acc[item.device_name].push(item);
+    return acc;
+  }, {});
+
+  tbody.innerHTML = '';
+
+  Object.entries(grouped).forEach(([deviceName, metrics]) => {
+    metrics.forEach(metric => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${metric.device_name}</td>
+        <td>${metric.key}</td>
+        <td>${metric.value !== null ? metric.value : '—'}</td>
+        <td>${metric.last_update_time ? fmtTime(metric.last_update_time) : '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (document.getElementById('autoRefresh').checked) {
+    autoRefreshTimer = setInterval(loadData, Math.max(3, parseInt(document.getElementById('refreshInterval').value)) * 1000);
+  }
+}
+function stopAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+}
+
+async function exportCSV() {
+  const gateway = document.getElementById('filterGateway').value;
+  if (!gateway) return alert('Select a gateway first.');
+  const device = document.getElementById('filterDevice').value;
+  const q = document.getElementById('filterSearch').value.trim();
+  const limit = document.getElementById('filterLimit').value || '50';
+  const params = new URLSearchParams({ gateway, limit });
+  if (device) params.append('device', device);
+  if (q) params.append('q', q);
+
+  try {
+    const res = await fetch(API_CSV + '?' + params.toString());
+    if (!res.ok) throw new Error("Failed to fetch CSV");
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "monitor_data.csv";   // force download instead of opening
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("CSV download failed:", err);
+    alert("CSV download failed");
+  }
+}
+  
+document.getElementById('filterGateway').addEventListener('change', () => {
+  loadData();
+  loadDevicesForGateway(); // optional: load devices dynamically based on gateway
+});
+document.getElementById('filterDevice').addEventListener('change', loadData);
+document.getElementById('filterSearch').addEventListener('input', loadData);
+document.getElementById('filterLimit').addEventListener('change', loadData);
+document.getElementById('btnRefresh').addEventListener('click', loadData);
+document.getElementById('btnExport').addEventListener('click', exportCSV);
+document.getElementById('autoRefresh').addEventListener('change', startAutoRefresh);
+document.getElementById('refreshInterval').addEventListener('change', startAutoRefresh);
+
+async function loadData() {
+  const gateway = document.getElementById('filterGateway').value;
+  if (!gateway) {
+    document.getElementById('monitorRows').innerHTML = `<tr><td colspan="6"><div class="empty-state">Please select a gateway.</div></td></tr>`;
+    return;
+  }
+  const device = document.getElementById('filterDevice').value;
+  const q = document.getElementById('filterSearch').value.trim();
+  const limit = document.getElementById('filterLimit').value || '50';
+  const params = new URLSearchParams({ gateway, limit });
+  if (device) params.append('device', device);
+  if (q) params.append('q', q);
+
+  const res = await fetch(API_DATA + '?' + params.toString());
+  const payload = await res.json();
+
+  // Fix: use payload.data instead of payload.rows
+  document.getElementById('lastUpdated').innerText = 'Last update: ' + (payload.meta?.last_updated ? fmtTime(payload.meta.last_updated) : fmtTime(new Date()));
+  renderRows(payload.data || []);
+}
+
+async function loadDevicesForGateway() {
+    const gateway = document.getElementById('filterGateway').value;
+    if (!gateway) return;
+
+    try {
+        const res = await fetch(`/api/devices/${gateway}/`);
+        const payload = await res.json();
+
+        if (payload.devices && payload.devices.length > 0) {
+            populateSelect('filterDevice', payload.devices, 'id', 'device_name', true);
+        } else {
+            // No devices
+            const sel = document.getElementById('filterDevice');
+            sel.innerHTML = '';
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.text = 'All Devices';
+            sel.appendChild(opt);
+        }
+
+        document.getElementById('filterDevice').value = '';
+    } catch (error) {
+        console.error('Error loading devices:', error);
+    }
+}
+
+// Fix: Await loadDevicesForGateway before loading data
+document.getElementById('filterGateway').addEventListener('change', async () => {
+  await loadDevicesForGateway();
+  await loadData();
+});
+
+window.onload = async () => {
+  await loadFilters();
+  await loadData();
+  startAutoRefresh();
+};
+</script>
+{% endblock %}

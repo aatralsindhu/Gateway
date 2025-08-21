@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Outbound Connector: {{ connector.name }} - IH Gateway{% endblock %}
+
+{% block content %}
+<style>
+    .breadcrumb {
+        background: #f8f9fa;
+        border-radius: 0.375rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .breadcrumb-item + .breadcrumb-item::before {
+        content: ">";
+        color: #6c757d;
+        padding: 0 0.5rem;
+    }
+    .breadcrumb-item a {
+        color: #0d6efd;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    .breadcrumb-item a:hover {
+        color: #0a58ca;
+        text-decoration: underline;
+    }
+    .breadcrumb-item.active {
+        color: #495057;
+        font-weight: 600;
+    }
+</style>
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{% url 'gateway_list' %}">Gateway List</a></li>
+        <li class="breadcrumb-item"><a href="{% url 'gateway_detail' connector.gateway.id %}">{{ connector.gateway.name }}</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Outbound Connector Configuration</li>
+    </ol>
+</nav>
+
+<div class="container">
+    <div class="ih-card shadow-sm p-4 rounded">
+        <h3 class="mb-4 text-primary">Outbound Connector Configuration</h3>
+
+        <form method="post" enctype="multipart/form-data" novalidate>
+            {% csrf_token %}
+
+            <!-- Connector Name -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Connector Name</label>
+                <input type="text" name="name" class="form-control" value="{{ connector.name }}" required>
+            </div>
+
+            <!-- Connector Type -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Connector Type</label>
+                <!-- Hidden field so Django gets the value -->
+                <input type="hidden" name="connector_type" value="{{ connector.connector_type }}">
+                <input type="text" class="form-control" value="{{ connector.connector_type|capfirst }}" readonly>
+            </div>
+
+            {% if connector.connector_type == 'mqtt' %}
+            <!-- MQTT Configuration -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Broker Address</label>
+                <input type="text" class="form-control" name="broker_ip" value="{{ mqtt_data.broker|default_if_none:'' }}" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Broker Port</label>
+                <input type="number" class="form-control" name="port" value="{{ mqtt_data.port|default_if_none:1883 }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Username</label>
+                <input type="text" class="form-control" name="username" value="{{ mqtt_data.username|default_if_none:'' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Password</label>
+                <input type="password" class="form-control" name="password" value="{{ mqtt_data.password|default_if_none:'' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Topic</label>
+                <input type="text" class="form-control" name="topic" value="{{ mqtt_data.topic|default_if_none:'' }}">
+            </div>
+            <div class="mb-3 form-check">
+                <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck">
+                <label class="form-check-label" for="tlsCheck">Enable TLS/SSL</label>
+            </div>
+            <div id="tls-files-section" style="display: none; margin-bottom:16px;">
+                <div class="mb-3">
+                    <label class="form-label">CA Certificate File</label>
+                    <input type="file" class="form-control" name="ca_cert" accept=".crt,.pem">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Client Certificate File</label>
+                    <input type="file" class="form-control" name="client_cert" accept=".crt,.pem">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Private Key File</label>
+                    <input type="file" class="form-control" name="private_key" accept=".key,.pem">
+                </div>
+            </div>
+            {% elif connector.connector_type == 'rest' %}
+            <!-- REST API Configuration -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">API Endpoint URL</label>
+                <input type="url" class="form-control" name="rest_url" value="{{ connector.rest_url|default_if_none:'' }}" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">HTTP Method</label>
+                <select name="rest_method" class="form-control">
+                    <option value="POST" {% if connector.rest_method == 'POST' %}selected{% endif %}>POST</option>
+                    <option value="GET" {% if connector.rest_method == 'GET' %}selected{% endif %}>GET</option>
+                </select>
+            </div>
+            {% endif %}
+            <button type="submit" class="btn btn-primary w-100">Save Configuration</button>
+            
+        </form>
+    </div>
+</div>
+
+{% if connector.connector_type == 'mqtt' %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const tlsCheck = document.getElementById('tlsCheck');
+    const tlsFilesSection = document.getElementById('tls-files-section');
+    tlsCheck.addEventListener('change', function() {
+        tlsFilesSection.style.display = this.checked ? "block" : "none";
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

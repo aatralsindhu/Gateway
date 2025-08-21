@@ -1,0 +1,461 @@
+{% extends "base.html" %}
+{% block title %}Inbound Connector: {{ connector.name }} - IH Gateway{% endblock %}
+
+{% block content %}
+<style>
+/* Your existing styles */
+.ih-card { background: #fff; border-radius: 1rem; padding: 2rem; box-shadow: 0 6px 20px rgba(0,0,0,0.05); margin-bottom: 2rem; }
+.ih-card h3 { font-weight: 700; color: #2c3e50; }
+.breadcrumb { background: transparent; padding: 0; margin-bottom: 1rem; }
+.breadcrumb-item + .breadcrumb-item::before { content: "›"; padding: 0 0.5rem; color: #6b7280; }
+.device-header { display: flex; align-items: center; justify-content: space-between; background: #f7f9fc; padding: 0.75rem 1rem; border-radius: 0.5rem; cursor: pointer; transition: background 0.2s; }
+.device-header:hover { background: #e9edf5; }
+.device-header h5 { margin: 0; font-weight: 600; }
+.device-body { border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 0.5rem 0.5rem; padding: 1rem; background: #fafbfc; }
+.table { border-radius: 0.5rem; overflow: hidden; }
+.table thead { background-color: #f7f9fc; font-weight: 600; }
+.table tbody tr:hover { background-color: #f1f5fa; }
+.btn { border-radius: 0.5rem; font-weight: 500; }
+.btn-primary { background-color: #3b82f6; border: none; }
+.btn-primary:hover { background-color: #2563eb; }
+.btn-success { background-color: #10b981; border: none; }
+.btn-success:hover { background-color: #059669; }
+.btn-danger { background-color: #ef4444; border: none; }
+.btn-danger:hover { background-color: #dc2626; }
+.breadcrumb {
+    background: #f8f9fa; /* light gray background */
+    border-radius: 0.375rem; /* rounded corners */
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  }
+  .breadcrumb-item + .breadcrumb-item::before {
+    content: ">";
+    color: #6c757d;
+    padding: 0 0.5rem;
+  }
+  .breadcrumb-item a {
+    color: #0d6efd; /* bootstrap primary blue */
+    text-decoration: none;
+    transition: color 0.3s ease;
+  }
+  .breadcrumb-item a:hover {
+    color: #0a58ca;
+    text-decoration: underline;
+  }
+  .breadcrumb-item.active {
+    color: #495057; /* slightly darker gray for active */
+    font-weight: 600;
+  }
+/* Ensure consistent input padding & alignment */
+.ih-form-container input::placeholder,
+.ih-form-container select,
+.ih-form-container textarea::placeholder {
+    padding-left: 0; /* reset default browser indent */
+}
+
+/* Apply same left padding for all */
+.ih-form-container input,
+.ih-form-container select,
+.ih-form-container textarea {
+    padding-left: 0.75rem; /* consistent padding */
+    text-indent: 0; /* placeholder starts same line */
+    box-sizing: border-box;
+}
+
+/* Match vertical alignment */
+.ih-form-container input,
+.ih-form-container select,
+.ih-form-container textarea {
+    height: 38px; /* or match Bootstrap height */
+    line-height: 1.5;
+}
+
+
+
+</style>
+
+<!-- Breadcrumb -->
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+      <li class="breadcrumb-item"><a href="{% url 'gateway_list' %}">Gateway List</a></li>
+      <li class="breadcrumb-item"><a href="{% url 'gateway_detail' connector.gateway.id %}">{{ connector.gateway.name }}</a></li>
+      <li class="breadcrumb-item active" aria-current="page">Inbound Connector Configuration</li>
+  </ol>
+</nav>
+
+<div class="ih-card">
+    <h3 class="mb-4">Inbound Connector Configuration</h3>
+
+    <form method="post" enctype="multipart/form-data" novalidate>
+        {% csrf_token %}
+        {{ form.as_p }}
+        {% if connector.connector_type == 'modbus' %}
+        <!-- Add Device -->
+        <div class="mb-4">
+            <h5>Add New Device</h5>
+            <div class="row g-2">
+                <div class="col-md-5">
+                    <input type="text" class="form-control" id="deviceName" placeholder="Device Name">
+                </div>
+                <div class="col-md-5">
+                    <input type="text" class="form-control" id="deviceId" placeholder="Device ID">
+                </div>
+                <div class="col-md-3">
+                    <input type="text" class="form-control" id="deviceIp" placeholder="Device IP">
+                </div>
+                <div class="col-md-2">
+                    <input type="number" class="form-control" id="devicePort" placeholder="Port">
+                </div>
+                <div class="col-md-2">
+                    <button type="button" class="btn btn-success w-100" onclick="addDevice()">Add Device</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Device List -->
+        <div id="deviceList">
+            {% for device in devices %}
+            <div class="mb-3 device-item" id="device-{{ forloop.counter0 }}">
+                <input type="hidden" name="devices[{{ forloop.counter0 }}][name]" value="{{ device.device_name }}">
+                <input type="hidden" name="devices[{{ forloop.counter0 }}][id]" value="{{ device.device_id }}">
+                <input type="hidden" name="devices[{{ forloop.counter0 }}][ip]" value="{{ device.device_ip }}">
+                <input type="hidden" name="devices[{{ forloop.counter0 }}][port]" value="{{ device.device_port }}">
+
+
+                <div class="device-header" onclick="toggleDeviceBody(this)">
+                    <h5>{{ device.device_name }} (ID: {{ device.device_id }})</h5>
+                    <span class="arrow">&#9654;</span>
+                </div>
+
+                <div class="device-body" style="display: none;">
+                    <!-- Timeseries Input Row -->
+                     <!-- Device Details Editable Fields -->
+<div class="row g-2 mb-3">
+    <div class="col-md-5">
+        <label class="form-label">Device Name</label>
+        <input type="text" class="form-control" value="{{ device.device_name }}" readonly>
+    </div>
+    <div class="col-md-5">
+        <label class="form-label">Device ID</label>
+        <input type="text" class="form-control" value="{{ device.device_id }}" readonly>
+    </div>
+    <div class="col-md-3">
+        <label class="form-label">Device IP</label>
+        <input type="text" class="form-control" name="devices[{{ forloop.counter0 }}][ip]" value="{{ device.device_ip }}">
+    </div>
+    <div class="col-md-2">
+        <label class="form-label">Port</label>
+        <input type="number" class="form-control" name="devices[{{ forloop.counter0 }}][port]" value="{{ device.device_port }}">
+    </div>
+</div>
+<!-- Timeseries Input Row -->
+
+                    <div class="row g-2 mb-3 timeseries-input-row">
+                        <div class="col"><input type="text" class="form-control" name="devices[{{ forloop.counter0 }}][ts][name][]" placeholder="Name"></div>
+                        <div class="col"><input type="text" class="form-control" name="devices[{{ forloop.counter0 }}][ts][scale][]" placeholder="Scale"></div>
+                        <div class="col"><input type="text" class="form-control" name="devices[{{ forloop.counter0 }}][ts][address][]" placeholder="Address"></div>
+                        <div class="col">
+                            <select class="form-select" name="devices[{{ forloop.counter0 }}][ts][byte_order][]">
+                                <option value="">Byte Order</option>
+                                <option>AB</option>
+                                <option>BA</option>
+                                <option>ABCD</option>
+                                <option>DCBA</option>
+                                <option>CDAB</option>
+                                <option>GHEFCDAB</option>
+                            </select>
+                        </div>
+                        <div class="col">
+                            <select class="form-select" name="devices[{{ forloop.counter0 }}][ts][data_type][]">
+                                <option value="">Data Type</option>
+                                <option>UINT16</option>
+                                <option>UINT32</option>
+                                <option>UINT64</option>
+                                <option>INT16</option>
+                                <option>INT32</option>
+                                <option>INT64</option>
+                                <option>FLOAT32-IEEE</option>
+                                <option>FLOAT64-IEEE</option>
+                                <option>FLOAT32</option>
+                                <option>FIXED</option>
+                                <option>UFIXED</option>
+                                <option>DOUBLE</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <button type="button" class="btn btn-success" onclick="addTimeseriesRow({{ forloop.counter0 }})">Add</button>
+                        </div>
+                    </div>
+
+                    <!-- Timeseries Table -->
+                    <table class="table table-sm table-bordered">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Scale</th>
+                                <th>Address</th>
+                                <th>Byte Order</th>
+                                <th>Data Type</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ts in device.timeseries.all %}
+                            <tr>
+                                <td>
+                                  <input type="hidden" name="devices[{{ forloop.parentloop.counter0 }}][ts][name][]" value="{{ ts.name }}">
+                                  {{ ts.name }}
+                                </td>
+                                <td>
+                                  <input type="hidden" name="devices[{{ forloop.parentloop.counter0 }}][ts][scale][]" value="{{ ts.scale }}">
+                                  {{ ts.scale }}
+                                </td>
+                                <td>
+                                  <input type="hidden" name="devices[{{ forloop.parentloop.counter0 }}][ts][address][]" value="{{ ts.address }}">
+                                  {{ ts.address }}
+                                </td>
+                                <td>
+                                  <input type="hidden" name="devices[{{ forloop.parentloop.counter0 }}][ts][byte_order][]" value="{{ ts.byte_order }}">
+                                  {{ ts.byte_order }}
+                                </td>
+                                <td>
+                                  <input type="hidden" name="devices[{{ forloop.parentloop.counter0 }}][ts][data_type][]" value="{{ ts.data_type }}">
+                                  {{ ts.data_type }}
+                                </td>
+                                <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="6" class="text-center text-muted">No timeseries configured.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% elif connector.connector_type == 'mqtt' %}
+        <!-- MQTT Configuration -->
+            <div class="mb-3">
+                <label class="form-label fw-bold">Broker Address</label>
+                <input type="text" class="form-control" name="broker_ip" value="{{ mqtt_data.broker_ip|default_if_none:'127.0.0.1' }}" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Broker Port</label>
+                <input type="number" class="form-control" name="port" value="{{ mqtt_data.port|default_if_none:1883 }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Username</label>
+                <input type="text" class="form-control" name="username" value="{{ mqtt_data.username|default_if_none:'' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Password</label>
+                <input type="password" class="form-control" name="password" value="{{ mqtt_data.password|default_if_none:'' }}">
+            </div>
+            <div class="mb-3">
+                <label class="form-label fw-bold">Topic</label>
+                <input type="text" class="form-control" name="topic" value="{{ mqtt_data.topic|default_if_none:'' }}">
+            </div>
+            <div class="mb-3 form-check">
+                <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck">
+                <label class="form-check-label" for="tlsCheck">Enable TLS/SSL</label>
+            </div>
+            <div id="tls-files-section" style="display: none; margin-bottom:16px;">
+                <div class="mb-3">
+                    <label class="form-label">CA Certificate File</label>
+                    <input type="file" class="form-control" name="ca_cert" accept=".crt,.pem">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Client Certificate File</label>
+                    <input type="file" class="form-control" name="client_cert" accept=".crt,.pem">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Private Key File</label>
+                    <input type="file" class="form-control" name="private_key" accept=".key,.pem">
+                </div>
+            </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary mt-3">Save Connector</button>
+    </form>
+</div>
+{% if connector.connector_type == 'mqtt' %}
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const tlsCheck = document.getElementById('tlsCheck');
+    const tlsFilesSection = document.getElementById('tls-files-section');
+    tlsCheck.addEventListener('change', function() {
+        tlsFilesSection.style.display = this.checked ? "block" : "none";
+    });
+});
+</script>
+{% elif connector.connector_type == 'modbus' %}
+<script>
+function toggleDeviceBody(header) {
+    const body = header.nextElementSibling;
+    const arrow = header.querySelector(".arrow");
+    if (body.style.display === "none" || body.style.display === "") {
+        body.style.display = "block";
+        arrow.innerHTML = "&#9660;";  // Down arrow
+    } else {
+        body.style.display = "none";
+        arrow.innerHTML = "&#9654;";  // Right arrow
+    }
+}
+
+function addDevice() {
+    const name = document.getElementById("deviceName").value.trim();
+    const id = document.getElementById("deviceId").value.trim();
+    const ip = document.getElementById("deviceIp").value.trim();
+    const port = document.getElementById("devicePort").value.trim();
+
+    if (!name || !id || !ip || !port) {
+        alert("Please enter Device Name, Device ID, Device IP, and Port.");
+        return;
+    }
+
+    const index = document.querySelectorAll(".device-item").length;
+    const deviceList = document.getElementById("deviceList");
+
+    const deviceHTML = `
+        <div class="mb-3 device-item" id="device-${index}">
+            <input type="hidden" name="devices[${index}][name]" value="${name}">
+            <input type="hidden" name="devices[${index}][id]" value="${id}">
+            <input type="hidden" name="devices[${index}][ip]" value="${ip}">
+            <input type="hidden" name="devices[${index}][port]" value="${port}">
+
+            <div class="device-header" onclick="toggleDeviceBody(this)">
+                <h5>${name} (ID: ${id})</h5>
+                <span class="arrow">&#9654;</span>
+            </div>
+
+            <div class="device-body" style="display: none;">
+                <!-- Timeseries Input Row -->
+                <div class="row g-2 mb-3 timeseries-input-row">
+                    <div class="col"><input type="text" class="form-control" name="devices[${index}][ts][name][]" placeholder="Name"></div>
+                    <div class="col"><input type="text" class="form-control" name="devices[${index}][ts][scale][]" placeholder="Scale"></div>
+                    <div class="col"><input type="text" class="form-control" name="devices[${index}][ts][address][]" placeholder="Address"></div>
+                    <div class="col">
+                        <select class="form-select" name="devices[${index}][ts][byte_order][]">
+                            <option value="">Byte Order</option>
+                            <option>AB</option>
+                            <option>BA</option>
+                            <option>ABCD</option>
+                            <option>DCBA</option>
+                            <option>CDAB</option>
+                            <option>GHEFCDAB</option>
+                        </select>
+                    </div>
+                    <div class="col">
+                        <select class="form-select" name="devices[${index}][ts][data_type][]">
+                            <option value="">Data Type</option>
+                            <option>UINT16</option>
+                            <option>UINT32</option>
+                            <option>UINT64</option>
+                            <option>INT16</option>
+                            <option>INT32</option>
+                            <option>INT64</option>
+                            <option>FLOAT32-IEEE</option>
+                            <option>FLOAT64-IEEE</option>
+                            <option>FLOAT32</option>
+                            <option>FIXED</option>
+                            <option>UFIXED</option>
+                            <option>DOUBLE</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-success" onclick="addTimeseriesRow(${index})">Add</button>
+                    </div>
+                </div>
+                <!-- Timeseries Table -->
+                <table class="table table-sm table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Scale</th>
+                            <th>Address</th>
+                            <th>Byte Order</th>
+                            <th>Data Type</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" class="text-center text-muted">No timeseries configured.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    deviceList.insertAdjacentHTML("beforeend", deviceHTML);
+
+    // Clear input fields
+    document.getElementById("deviceName").value = "";
+    document.getElementById("deviceId").value = "";
+    document.getElementById("deviceIp").value = "";
+    document.getElementById("devicePort").value = "";
+}
+
+function addTimeseriesRow(deviceIndex) {
+    const deviceElem = document.getElementById(`device-${deviceIndex}`);
+    const tbody = deviceElem.querySelector("table tbody");
+
+    // Remove "No timeseries configured." row if present
+    const noDataRow = tbody.querySelector("tr td.text-center.text-muted");
+    if (noDataRow) {
+        noDataRow.parentElement.remove();
+    }
+
+    // Grab inputs from the input row above the table
+    const inputRow = deviceElem.querySelector(".timeseries-input-row");
+    const name = inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][name][]"]`).value.trim();
+    const scale = inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][scale][]"]`).value.trim();
+    const address = inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][address][]"]`).value.trim();
+    const byteOrderSelect = inputRow.querySelector(`select[name="devices[${deviceIndex}][ts][byte_order][]"]`);
+    const byteOrder = byteOrderSelect.options[byteOrderSelect.selectedIndex].value;
+    const dataTypeSelect = inputRow.querySelector(`select[name="devices[${deviceIndex}][ts][data_type][]"]`);
+    const dataType = dataTypeSelect.options[dataTypeSelect.selectedIndex].value;
+
+    if (!name) {
+        alert("Timeseries Name is required.");
+        return;
+    }
+
+    // Create new row
+    const newRow = document.createElement("tr");
+
+    newRow.innerHTML = `
+        <td>
+          <input type="hidden" name="devices[${deviceIndex}][ts][name][]" value="${name}">
+          ${name}
+        </td>
+        <td>
+          <input type="hidden" name="devices[${deviceIndex}][ts][scale][]" value="${scale}">
+          ${scale}
+        </td>
+        <td>
+          <input type="hidden" name="devices[${deviceIndex}][ts][address][]" value="${address}">
+          ${address}
+        </td>
+        <td>
+          <input type="hidden" name="devices[${deviceIndex}][ts][byte_order][]" value="${byteOrder}">
+          ${byteOrder}
+        </td>
+        <td>
+          <input type="hidden" name="devices[${deviceIndex}][ts][data_type][]" value="${dataType}">
+          ${dataType}
+        </td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">Remove</button></td>
+    `;
+
+    tbody.appendChild(newRow);
+
+    // Clear inputs
+    inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][name][]"]`).value = "";
+    inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][scale][]"]`).value = "";
+    inputRow.querySelector(`input[name="devices[${deviceIndex}][ts][address][]"]`).value = "";
+    byteOrderSelect.selectedIndex = 0;
+    dataTypeSelect.selectedIndex = 0;
+}
+</script>
+{% endif %}
+{% endblock %}

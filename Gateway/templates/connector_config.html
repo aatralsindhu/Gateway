@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Connector Configuration - {{ connector.name }}{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="ih-card">
+            <h3>{{ connector.name }} ({{ connector.type|capfirst }}) Configuration</h3>
+
+            <ul class="nav nav-tabs mt-3 mb-4" id="configTab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="inbound-tab" data-bs-toggle="tab" data-bs-target="#inbound" type="button" role="tab" aria-controls="inbound" aria-selected="true">Inbound (Device Data)</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="outbound-tab" data-bs-toggle="tab" data-bs-target="#outbound" type="button" role="tab" aria-controls="outbound" aria-selected="false">Outbound (Send Data)</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="advanced-tab" data-bs-toggle="tab" data-bs-target="#advanced" type="button" role="tab" aria-controls="advanced" aria-selected="false">Advanced (Raw Config JSON)</button>
+                </li>
+            </ul>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="tab-content" id="configTabContent">
+
+                    <!-- Inbound Tab -->
+                    <div class="tab-pane fade show active" id="inbound" role="tabpanel" aria-labelledby="inbound-tab">
+                        <h5>Timeseries Configuration</h5>
+                        <div id="add-timeseries-form" class="border rounded p-3 mb-3">
+                            <div class="row g-2">
+                                <div class="col-md-3">
+                                    <input type="text" name="ts_name" class="form-control" placeholder="Name" required>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="text" name="ts_scale" class="form-control" placeholder="Scale" required>
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="text" name="ts_address" class="form-control" placeholder="Address" required>
+                                </div>
+                                <div class="col-md-2">
+                                    <select name="ts_byte_order" class="form-select" required>
+                                        <option value="">Byte Order</option>
+                                        <option value="AB">AB</option>
+                                        <option value="BA">BA</option>
+                                        <option value="ABCD">ABCD</option>
+                                        <option value="DCBA">DCBA</option>
+                                        <option value="CDAB">CDAB</option>
+                                        <option value="GHEFCDAB">GHEFCDAB</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <select name="ts_data_type" class="form-select" required>
+                                        <option value="">Data Type</option>
+                                        <option value="UINT16">UINT16</option>
+                                        <option value="UINT32">UINT32</option>
+                                        <option value="UINT64">UINT64</option>
+                                        <option value="INT16">INT16</option>
+                                        <option value="INT32">INT32</option>
+                                        <option value="INT64">INT64</option>
+                                        <option value="FLOAT32-IEEE">FLOAT32-IEEE</option>
+                                        <option value="FLOAT64-IEEE">FLOAT64-IEEE</option>
+                                        <option value="FLOAT32">FLOAT32</option>
+                                        <option value="FIXED">FIXED</option>
+                                        <option value="UFIXED">UFIXED</option>
+                                        <option value="DOUBLE">DOUBLE</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-primary mt-3" onclick="addTimeseriesRow()">Add</button>
+                        </div>
+
+                        <h6>Configured Timeseries</h6>
+                        <table class="table table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Scale</th>
+                                    <th>Address</th>
+                                    <th>Byte Order</th>
+                                    <th>Data Type</th>
+                                </tr>
+                            </thead>
+                            <tbody id="timeseries-body">
+                            {% for ts in timeseries_list %}
+                                <tr>
+                                    <td>{{ ts.name }}</td>
+                                    <td>{{ ts.scale }}</td>
+                                    <td>{{ ts.address }}</td>
+                                    <td>{{ ts.byte_order }}</td>
+                                    <td>{{ ts.data_type }}</td>
+                                </tr>
+                            {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Outbound Tab -->
+                    <div class="tab-pane fade" id="outbound" role="tabpanel" aria-labelledby="outbound-tab">
+                        <h5>Outbound Settings</h5>
+                        <div class="mb-3">
+                            <label class="form-label">Outbound Endpoint (e.g., MQTT Broker URL, HTTP API)</label>
+                            <input type="url" class="form-control" name="outbound_endpoint" 
+                            value="{{ connector.configuration.outbound_endpoint|default:'' }}" placeholder="http://..." >
+                        </div>
+                        <!-- Add more outbound specific config fields as needed -->
+                        <div class="mb-3">
+                            <label class="form-label">Outbound Topic / API Path</label>
+                            <input type="text" class="form-control" name="outbound_topic" 
+                            value="{{ connector.configuration.outbound_topic|default:'' }}" placeholder="Topic or path">
+                        </div>
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" name="outbound_use_tls" id="dsTlsCheck" {% if connector.configuration.outbound_use_tls %}checked{% endif %}>
+                            <label for="dsTlsCheck" class="form-check-label">Use TLS/SSL</label>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Tab (Raw JSON) -->
+                    <div class="tab-pane fade" id="advanced" role="tabpanel" aria-labelledby="advanced-tab">
+                        <h5>Advanced Configuration (Raw JSON)</h5>
+                        <textarea class="form-control" rows="10" name="configuration" placeholder='{"baudrate":9600, "parity":"N"}'>{{ connector.configuration|safe }}</textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-success mt-4 w-100">Save Configuration</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function addTimeseriesRow() {
+    var name = document.getElementsByName('ts_name')[0].value.trim();
+    var scale = document.getElementsByName('ts_scale')[0].value.trim();
+    var address = document.getElementsByName('ts_address')[0].value.trim();
+    var byte_order = document.getElementsByName('ts_byte_order')[0].value;
+    var data_type = document.getElementsByName('ts_data_type')[0].value;
+
+    if (!name || !scale || !address || !byte_order || !data_type) {
+        alert("Please fill all timeseries fields to add.");
+        return;
+    }
+    var tbody = document.getElementById('timeseries-body');
+    var row = document.createElement('tr');
+    row.innerHTML = `
+      <td><input type="hidden" name="new_ts_name[]" value="${name}">${name}</td>
+      <td><input type="hidden" name="new_ts_scale[]" value="${scale}">${scale}</td>
+      <td><input type="hidden" name="new_ts_address[]" value="${address}">${address}</td>
+      <td><input type="hidden" name="new_ts_byte_order[]" value="${byte_order}">${byte_order}</td>
+      <td><input type="hidden" name="new_ts_data_type[]" value="${data_type}">${data_type}</td>
+    `;
+    tbody.appendChild(row);
+
+    // Reset inputs
+    document.getElementsByName('ts_name')[0].value = '';
+    document.getElementsByName('ts_scale')[0].value = '';
+    document.getElementsByName('ts_address')[0].value = '';
+    document.getElementsByName('ts_byte_order')[0].value = '';
+    document.getElementsByName('ts_data_type')[0].value = '';
+}
+</script>
+{% endblock %}
