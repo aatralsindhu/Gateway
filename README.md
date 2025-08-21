@@ -62,6 +62,3 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 ## License
 This project is licensed under the MIT License. See the LICENSE file for more details.
 
-mosquitto_sub -h 127.0.0.1 -p 1883 -t "gateway/timeseries/"
-
-mosquitto_pub -h 127.0.0.1 -p 1883  -t "gateway/timeseries/" -m '{"node": "PV1-AWSLF1", "group": "69a89d27-e2f0-4d1d-ac6d-cdad45f3022f", "timestamp": 1755676930526, "values": {"active_power": 10.0, "powerfactor": 1.0, "avg_current": 41.1, "voltage_ll": 2400.0, "voltage_ln": 24.0, "frequency": 0.0}, "errors": {}}'
