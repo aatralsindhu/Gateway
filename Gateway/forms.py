@@ -21,6 +21,24 @@ class OutboundConnectorForm(forms.ModelForm):
         fields = ['name', 'connector_type']
        
 class MQTTConfigurationForm(forms.ModelForm):
+    topics = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 3}),
+        required=False,
+        help_text="Enter multiple topics separated by commas or new lines."
+    )
+
     class Meta:
         model = IHG_MQTTConfiguration
-        fields = ['broker_ip', 'port', 'username', 'password', 'topic', 'interval']
+        fields = ['broker_ip', 'port', 'username', 'password', 'interval']  # NO 'topics' here
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk and hasattr(self.instance, 'topics'):
+            existing_topics = self.instance.topics.all()
+            self.initial['topics'] = ", ".join(t.name for t in existing_topics)
+
+    def clean_topics(self):
+        data = self.cleaned_data.get('topics')
+        if not data:
+            return []
+        return [t.strip() for t in data.replace('\n', ',').split(',') if t.strip()]

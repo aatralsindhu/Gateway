@@ -1,10 +1,10 @@
 import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
-from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData
+from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic
 from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm
 import logging
-
+from Gateway import mqtt,modbus
 from django.db.models import Count, Q, Max
 from django.http import JsonResponse, HttpResponse
 
@@ -46,6 +46,10 @@ def delete_gateway(request, pk):
     if request.method == 'POST':
         gateway.delete()
         messages.success(request, 'Gateway deleted successfully.')
+        modbus.stop_modbus_loop()
+        modbus.start_modbus_loop()
+        mqtt.stop_mqtt_loop()
+        mqtt.start_mqtt_loop()
         return redirect('gateway_list')
     return render(request, 'delete_gateway.html', {'gateway': gateway})
 
@@ -82,28 +86,114 @@ def add_inbound_connector(request, gateway_pk):
     return render(request, 'add_connector.html', {'form': form, 'gateway': gateway, 'direction': 'Inbound'})
 
 
+def get_mqtt_data_nested(mqtt_config):
+    topics_dict = {}
+    for i, topic in enumerate(mqtt_config.topics.all().order_by('id')):
+        devices_dict = {}
+        for j, device in enumerate(topic.devices.all().order_by('id')):
+            timeseries_dict = {}
+            for k, ts in enumerate(device.timeseries.all().order_by('id')):
+                timeseries_dict[k] = {
+                    'key': ts.key,
+                    'type': ts.type
+                }
+            devices_dict[j] = {
+                'device_name': device.device_name,
+                'device_id': device.device_id,
+                'timeseries': timeseries_dict,
+            }
+        topics_dict[i] = {
+            'name': topic.name,
+            'devices': devices_dict,
+        }
+    return topics_dict
+
 def edit_inbound_connector(request, connector_pk):
     connector = get_object_or_404(IHG_InboundConnector, pk=connector_pk)
     mqtt_config = None
+    mqtt_form = None
+    mqtt_topics_nested = {}
     if connector.connector_type == "mqtt":
         mqtt_config, _ = IHG_MQTTConfiguration.objects.get_or_create(connector_inbound=connector)
+        
+        if mqtt_config:
+            # Build nested structure for template
+            mqtt_topics_nested = get_mqtt_data_nested(mqtt_config)
 
     if request.method == 'POST':
         form = InboundConnectorForm(request.POST, instance=connector)
+
         if form.is_valid():
             connector = form.save()
+
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
-                print("mqtt_form",mqtt_form)
+                
                 if mqtt_form.is_valid():
                     mqtt_form.instance.connector_inbound = connector
+                    # Save MQTT general config (broker IP, port, credentials)
                     mqtt_form.save()
 
-            elif connector.connector_type =="modbus":
-            # Remove old devices & timeseries so we can replace with submitted data
+                    # Clear existing topics, devices, and timeseries to replace
+                    IHG_MQTTTopic.objects.filter(mqtt_config=mqtt_config).delete()
+
+                    # Loop through topics in POST
+                    # Expect topics indexed as: topics[0][name], topics[0][devices][0][name], etc.
+                    post = request.POST
+
+                    topic_keys = [key for key in post if key.startswith("topics[") and key.endswith("][name]")]
+                    # Extract topic indices like '0', '1' from keys 'topics[0][name]'
+                    topic_indices = sorted(set([key.split('[')[1].split(']')[0] for key in topic_keys]))
+
+                    for ti in topic_indices:
+                        topic_name = post.get(f"topics[{ti}][name]", "").strip()
+                        if not topic_name:
+                            continue
+
+                        # Create topic
+                        topic_obj = IHG_MQTTTopic.objects.create(mqtt_config=mqtt_config, name=topic_name)
+
+                        # Find device indices under this topic
+                        device_prefix = f"topics[{ti}][devices]"
+                        device_keys = [key for key in post if key.startswith(device_prefix) and key.endswith("][name]")]
+                        device_indices = sorted(set([key.split('[')[3].split(']')[0] for key in device_keys]))
+
+                        for di in device_indices:
+                            device_name = post.get(f"topics[{ti}][devices][{di}][name]", "").strip()
+                            if not device_name:
+                                continue
+
+                            device_id = post.get(f"topics[{ti}][devices][{di}][id]", "").strip() # If device_id field exists, adjust accordingly
+
+                            # Create device linked to topic
+                            device_obj = IHG_MQTTDevice.objects.create(
+                                topic=topic_obj,
+                                device_name=device_name,
+                                device_id=device_id
+                            )
+
+                            # Get timeseries under this device
+                            ts_key_prefix = f"topics[{ti}][devices][{di}][timeseries]"
+                            # Find all keys for timeseries keys
+                            ts_key_keys = [k for k in post if k.startswith(ts_key_prefix) and k.endswith("[key]")]
+                            ts_indices = sorted(set([k.split('[')[5].split(']')[0] for k in ts_key_keys]))
+
+                            for tsi in ts_indices:
+                                ts_key = post.get(f"topics[{ti}][devices][{di}][timeseries][{tsi}][key]", "").strip()
+                                ts_type = post.get(f"topics[{ti}][devices][{di}][timeseries][{tsi}][type]", "").strip()
+
+                                if ts_key:
+                                    IHG_MQTTTimeseries.objects.create(
+                                        device=device_obj,
+                                        key=ts_key,
+                                        type=ts_type if ts_type else 'String',
+                                    )
+                mqtt.stop_mqtt_loop()
+                mqtt.start_mqtt_loop()
+            elif connector.connector_type == "modbus":
+                # Existing modbus handling (unchanged)
                 Device.objects.filter(connector=connector).delete()
 
-                # Loop through posted devices
                 devices_data = [key for key in request.POST if key.startswith("devices[")]
                 device_indices = sorted(set([key.split('[')[1].split(']')[0] for key in devices_data]))
 
@@ -120,11 +210,10 @@ def edit_inbound_connector(request, connector_pk):
                         connector=connector,
                         device_name=name,
                         device_id=dev_id,
-                        device_ip = dev_ip,
-                        device_port = dev_port
+                        device_ip=dev_ip,
+                        device_port=dev_port
                     )
 
-                    # Timeseries for this device
                     ts_names = request.POST.getlist(f"devices[{idx}][ts][name][]")
                     ts_scales = request.POST.getlist(f"devices[{idx}][ts][scale][]")
                     ts_addresses = request.POST.getlist(f"devices[{idx}][ts][address][]")
@@ -141,7 +230,8 @@ def edit_inbound_connector(request, connector_pk):
                                 byte_order=ts_byte_orders[t].strip(),
                                 data_type=ts_data_types[t].strip()
                             )
-
+                modbus.stop_modbus_loop()
+                modbus.start_modbus_loop()
             messages.success(request, "Inbound connector updated successfully.")
             return redirect('edit_inbound_connector', connector_pk=connector_pk)
 
@@ -154,6 +244,8 @@ def edit_inbound_connector(request, connector_pk):
         'devices': devices,
         'form': form,
         'mqtt_data': mqtt_config,
+        'mqtt_form': mqtt_form,
+        'mqtt_topics_nested':mqtt_topics_nested
     })
 
 
@@ -174,13 +266,14 @@ def add_outbound_connector(request, gateway_pk):
 
 
 
-def edit_oudbound_connector(request, connector_pk):
+def edit_outbound_connector(request, connector_pk):
     connector = get_object_or_404(IHG_OutboundConnector, pk=connector_pk)
 
-    # Get or create MQTT config if connector_type is mqtt
     mqtt_config = None
+    mqtt_topics_list = []
     if connector.connector_type == "mqtt":
         mqtt_config, _ = IHG_MQTTConfiguration.objects.get_or_create(connector_outbound=connector)
+        mqtt_topics_list = list(IHG_MQTTTopic.objects.filter(mqtt_config=mqtt_config).values_list('name', flat=True))
 
     if request.method == 'POST':
         # Force connector_type to its original value to avoid tampering
@@ -191,31 +284,53 @@ def edit_oudbound_connector(request, connector_pk):
 
         if form.is_valid():
             connector = form.save()
-
-            # Save MQTT config if this is an MQTT connector
+            gateway_id = connector.gateway.id
+            in_connector = IHG_InboundConnector.objects.get(gateway=gateway_id)
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
-                print("mqtt_form",mqtt_form)
                 if mqtt_form.is_valid():
                     mqtt_form.instance.connector_outbound = connector
                     mqtt_form.save()
+                    # Clear all previous topics for this config
+                    IHG_MQTTTopic.objects.filter(mqtt_config=mqtt_config).delete()
+                    # Get topics from POST list (array of inputs)
+                    topics_list = request.POST.getlist('topics[]')
+                    for topic_name in topics_list:
+                        topic_name = topic_name.strip()
+                        if topic_name:
+                            IHG_MQTTTopic.objects.create(mqtt_config=mqtt_config, name=topic_name)
+                    # Reload topics for display
+                    mqtt_topics_list = list(IHG_MQTTTopic.objects.filter(mqtt_config=mqtt_config).values_list('name', flat=True))
+                
             elif connector.connector_type == "rest":
+                
                 connector.rest_url = post_data.get("rest_url")
                 connector.rest_method = post_data.get("rest_method", "POST")
                 connector.save(update_fields=["rest_url", "rest_method"])
+            elif connector.connector_type == 'openadr-ven':
+                connector.rest_url = post_data.get("rest_url")
+                
+                connector.save(update_fields=["rest_url"])
+            if in_connector.connector_type == "modbus":
+                modbus.stop_modbus_loop()
+                modbus.start_modbus_loop()
+            elif in_connector.connector_type == 'mqtt':
+                mqtt.stop_mqtt_loop()
+                mqtt.start_mqtt_loop()
 
+
+                
             print('Outbound connector updated.')
             return redirect('gateway_detail', pk=connector.gateway.pk)
     else:
         form = OutboundConnectorForm(instance=connector)
 
-    # Pass MQTT config data to template
     mqtt_data = {
         'broker': mqtt_config.broker_ip if mqtt_config else '',
         'port': mqtt_config.port if mqtt_config else 1883,
         'username': mqtt_config.username if mqtt_config else '',
         'password': mqtt_config.password if mqtt_config else '',
-        'topic': mqtt_config.topic if mqtt_config else '',
+        'topics': mqtt_topics_list if mqtt_topics_list else [],
     }
 
     return render(request, 'outbound_connector.html', {
@@ -499,9 +614,9 @@ def import_gateway_config(request, gateway_id):
                 defaults={
                     "broker_ip": ip,
                     "port": port,
-                    "username": mqtt.get("username"),
-                    "password": mqtt.get("password"),
-                    "topic": mqtt.get("topic", ""),
+                    "username": mqtt.get("username",''),
+                    "password": mqtt.get("password",''),
+                    "topics": mqtt.get("topic", ""),
                     "interval": mqtt.get("interval", "60s"),
                 }
             )
@@ -537,9 +652,9 @@ def import_gateway_config(request, gateway_id):
                 defaults={
                     "broker_ip": ip,
                     "port": port,
-                    "username": mqtt.get("username"),
-                    "password": mqtt.get("password"),
-                    "topic": mqtt.get("topic", ""),
+                    "username": mqtt.get("username",''),
+                    "password": mqtt.get("password",''),
+                    "topics": mqtt.get("topic", ""),
                     "interval": mqtt.get("interval", "60s"),
                 }
             )

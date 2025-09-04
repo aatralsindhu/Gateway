@@ -28,6 +28,19 @@
         color: #495057;
         font-weight: 600;
     }
+    .ih-card {
+        background: #fff;
+        border-radius: 1rem;
+        padding: 2rem;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+        margin-bottom: 2rem;
+    }
+    .form-label {
+        font-weight: 600;
+    }
+    #mqtt-topics-list .input-group {
+        gap: 0.5rem;
+    }
 </style>
 
 <nav aria-label="breadcrumb">
@@ -45,76 +58,99 @@
         <form method="post" enctype="multipart/form-data" novalidate>
             {% csrf_token %}
 
-            <!-- Connector Name -->
             <div class="mb-3">
-                <label class="form-label fw-bold">Connector Name</label>
-                <input type="text" name="name" class="form-control" value="{{ connector.name }}" required>
+                <label class="form-label" for="nameInput">Connector Name</label>
+                <input type="text" id="nameInput" name="name" class="form-control" value="{{ connector.name }}" required>
             </div>
 
-            <!-- Connector Type -->
             <div class="mb-3">
-                <label class="form-label fw-bold">Connector Type</label>
-                <!-- Hidden field so Django gets the value -->
+                <label class="form-label">Connector Type</label>
                 <input type="hidden" name="connector_type" value="{{ connector.connector_type }}">
                 <input type="text" class="form-control" value="{{ connector.connector_type|capfirst }}" readonly>
             </div>
 
-            {% if connector.connector_type == 'mqtt' %}
-            <!-- MQTT Configuration -->
+            {% if connector.connector_type == "mqtt" %}
             <div class="mb-3">
-                <label class="form-label fw-bold">Broker Address</label>
-                <input type="text" class="form-control" name="broker_ip" value="{{ mqtt_data.broker|default_if_none:'' }}" required>
+                <label class="form-label" for="brokerIpInput">Broker Address</label>
+                <input type="text" id="brokerIpInput" class="form-control" name="broker_ip" value="{{ mqtt_data.broker }}" required>
             </div>
+
             <div class="mb-3">
-                <label class="form-label fw-bold">Broker Port</label>
-                <input type="number" class="form-control" name="port" value="{{ mqtt_data.port|default_if_none:1883 }}">
+                <label class="form-label" for="portInput">Broker Port</label>
+                <input type="number" id="portInput" class="form-control" name="port" value="{{ mqtt_data.port }}">
             </div>
+
             <div class="mb-3">
-                <label class="form-label fw-bold">Username</label>
-                <input type="text" class="form-control" name="username" value="{{ mqtt_data.username|default_if_none:'' }}">
+                <label class="form-label" for="usernameInput">Username</label>
+                <input type="text" id="usernameInput" class="form-control" name="username" value="{{ mqtt_data.username }}">
             </div>
+
             <div class="mb-3">
-                <label class="form-label fw-bold">Password</label>
-                <input type="password" class="form-control" name="password" value="{{ mqtt_data.password|default_if_none:'' }}">
+                <label class="form-label" for="passwordInput">Password</label>
+                <input type="password" id="passwordInput" class="form-control" name="password" value="{{ mqtt_data.password }}">
             </div>
-            <div class="mb-3">
-                <label class="form-label fw-bold">Topic</label>
-                <input type="text" class="form-control" name="topic" value="{{ mqtt_data.topic|default_if_none:'' }}">
+
+            <div class="mb-4">
+                <label class="form-label">Topics</label>
+                <div id="mqtt-topics-list">
+    {% if mqtt_data.topics %}
+        {% for topic in mqtt_data.topics %}
+        <div class="input-group mb-2 mqtt-topic-row">
+            <input type="text" class="form-control" name="topics[]" value="{{ topic }}" placeholder="Topic name" required>
+            <button type="button" class="btn btn-danger" onclick="removeTopicRow(this)">Remove</button>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="input-group mb-2 mqtt-topic-row">
+            <input type="text" class="form-control" name="topics[]" placeholder="Topic name" required>
+            <button type="button" class="btn btn-danger" onclick="removeTopicRow(this)">Remove</button>
+        </div>
+    {% endif %}
+</div>
+<button type="button" class="btn btn-success" onclick="addTopicRow()">Add Topic</button>
+
             </div>
-            <div class="mb-3 form-check">
-                <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck">
+
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck" {% if mqtt_data.tls %}checked{% endif %}>
                 <label class="form-check-label" for="tlsCheck">Enable TLS/SSL</label>
             </div>
-            <div id="tls-files-section" style="display: none; margin-bottom:16px;">
+
+            <div id="tls-files-section" style="display: {% if mqtt_data.tls %}block{% else %}none{% endif %}; margin-bottom: 16px;">
                 <div class="mb-3">
-                    <label class="form-label">CA Certificate File</label>
-                    <input type="file" class="form-control" name="ca_cert" accept=".crt,.pem">
+                    <label class="form-label" for="caCertInput">CA Certificate File</label>
+                    <input type="file" id="caCertInput" class="form-control" name="ca_cert" accept=".crt,.pem">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Client Certificate File</label>
-                    <input type="file" class="form-control" name="client_cert" accept=".crt,.pem">
+                    <label class="form-label" for="clientCertInput">Client Certificate File</label>
+                    <input type="file" id="clientCertInput" class="form-control" name="client_cert" accept=".crt,.pem">
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Private Key File</label>
-                    <input type="file" class="form-control" name="private_key" accept=".key,.pem">
+                    <label class="form-label" for="privateKeyInput">Private Key File</label>
+                    <input type="file" id="privateKeyInput" class="form-control" name="private_key" accept=".key,.pem">
                 </div>
             </div>
             {% elif connector.connector_type == 'rest' %}
-            <!-- REST API Configuration -->
             <div class="mb-3">
-                <label class="form-label fw-bold">API Endpoint URL</label>
-                <input type="url" class="form-control" name="rest_url" value="{{ connector.rest_url|default_if_none:'' }}" required>
+                <label class="form-label" for="restUrlInput">API Endpoint URL</label>
+                <input type="url" id="restUrlInput" class="form-control" name="rest_url" value="{{ connector.rest_url|default_if_none:'' }}" required>
             </div>
             <div class="mb-3">
-                <label class="form-label fw-bold">HTTP Method</label>
-                <select name="rest_method" class="form-control">
+                <label class="form-label" for="restMethodSelect">HTTP Method</label>
+                <select id="restMethodSelect" name="rest_method" class="form-control">
                     <option value="POST" {% if connector.rest_method == 'POST' %}selected{% endif %}>POST</option>
                     <option value="GET" {% if connector.rest_method == 'GET' %}selected{% endif %}>GET</option>
                 </select>
             </div>
+            {% elif connector.connector_type == "openadr-ven" %}
+             <div class="mb-3">
+        <label class="form-label" for="vtnUrlInput">VTN URL</label>
+        <input type="url" id="vtnUrlInput" name="rest_url" class="form-control" value="{{ connector.rest_url|default_if_none:'' }}" required>
+    </div>
+
             {% endif %}
+
             <button type="submit" class="btn btn-primary w-100">Save Configuration</button>
-            
         </form>
     </div>
 </div>
@@ -128,6 +164,22 @@ document.addEventListener("DOMContentLoaded", function() {
         tlsFilesSection.style.display = this.checked ? "block" : "none";
     });
 });
+
+function addTopicRow() {
+    const list = document.getElementById('mqtt-topics-list');
+    const row = document.createElement("div");
+    row.classList.add("input-group", "mb-2", "mqtt-topic-row");
+    row.innerHTML = `
+        <input type="text" class="form-control" name="topics[]" placeholder="Topic name" required>
+        <button type="button" class="btn btn-danger" onclick="removeTopicRow(this)">Remove</button>
+    `;
+    list.appendChild(row);
+}
+
+function removeTopicRow(button) {
+    const row = button.closest('.mqtt-topic-row');
+    row.remove();
+}
 </script>
 {% endif %}
 {% endblock %}

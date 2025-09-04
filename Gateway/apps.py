@@ -12,8 +12,8 @@ class GatewayConfig(AppConfig):
             # Import here to avoid Django app registry issues
             from . import modbus, mqtt
 
-            # Start Modbus loop
-            threading.Thread(target=modbus.gateway_loop, daemon=True).start()
+            # # Start Modbus loop
+            modbus.start_modbus_loop()
 
-            # Start MQTT loop
-            threading.Thread(target=mqtt.mqtt_loop, daemon=True).start()
+            # # Start MQTT loop
+            mqtt.start_mqtt_loop()

@@ -15,7 +15,7 @@ urlpatterns = [
 
 
     path('gateway/<int:gateway_pk>/outbound_connector/add/', views.add_outbound_connector, name='add_outbound_connector'),
-    path('outbound_connector/<int:connector_pk>/edit/', views.edit_oudbound_connector, name='edit_oudbound_connector'),
+    path('outbound_connector/<int:connector_pk>/edit/', views.edit_outbound_connector, name='edit_outbound_connector'),
 
 
     path('inbound_connector/<int:connector_pk>/timeseries/add/', views.add_timeseries, name='add_timeseries'),

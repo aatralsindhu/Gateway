@@ -234,7 +234,7 @@
             </div>
             {% endfor %}
         </div>
-        {% elif connector.connector_type == 'mqtt' %}
+        {% elif connector.connector_type == 'mqtt'  %}
         <!-- MQTT Configuration -->
             <div class="mb-3">
                 <label class="form-label fw-bold">Broker Address</label>
@@ -252,10 +252,125 @@
                 <label class="form-label fw-bold">Password</label>
                 <input type="password" class="form-control" name="password" value="{{ mqtt_data.password|default_if_none:'' }}">
             </div>
-            <div class="mb-3">
-                <label class="form-label fw-bold">Topic</label>
-                <input type="text" class="form-control" name="topic" value="{{ mqtt_data.topic|default_if_none:'' }}">
+            <div class="mb-4">
+      <h4>MQTT Topics Configuration</h4>
+
+      <div id="topics-list">
+        {% if mqtt_topics_nested %}
+          {% for topic_idx, topic in mqtt_topics_nested.items %}
+          <div class="topic-item mb-4 p-3 border rounded" data-topic-index="{{ topic_idx }}">
+            <div class="d-flex justify-content-between align-items-center mb-2 topic-header" style="cursor:pointer;">
+              <div>
+                <span class="toggle-arrow">&#9654;</span>
+                <input type="text" name="topics[{{ topic_idx }}][name]" value="{{ topic.name }}" placeholder="Topic Name (e.g. sensor/+/data)" required class="form-control d-inline-block w-200">
+              </div>
+              <button type="button" class="btn btn-danger btn-sm" onclick="removeTopic(this)">Remove Topic</button>
             </div>
+            <div class="topic-body" style="display:none;">
+              <div class="devices-list">
+                {% for device_idx, device in topic.devices.items %}
+                <div class="device-item mb-3 p-2 border rounded" data-device-index="{{ device_idx }}">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <input type="text" name="topics[{{ topic_idx }}][devices][{{ device_idx }}][name]" value="{{ device.device_name }}" placeholder="Device Name" required class="form-control w-50">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(this)">Remove Device</button>
+                  </div>
+                  <div class="timeseries-list">
+                    {% for ts_idx, ts in device.timeseries.items %}
+                    <div class="input-group mb-2 timeseries-row">
+                      <input type="text" name="topics[{{ topic_idx }}][devices][{{ device_idx }}][timeseries][{{ ts_idx }}][key]" value="{{ ts.key }}" placeholder="Key" required class="form-control">
+                      <select name="topics[{{ topic_idx }}][devices][{{ device_idx }}][timeseries][{{ ts_idx }}][type]" required class="form-select">
+                        <option value="">Select Type</option>
+                        <option value="String" {% if ts.type == 'String' %}selected{% endif %}>String</option>
+                        <option value="Integer" {% if ts.type == 'Integer' %}selected{% endif %}>Integer</option>
+                        <option value="Double" {% if ts.type == 'Double' %}selected{% endif %}>Double</option>
+                        <option value="Boolean" {% if ts.type == 'Boolean' %}selected{% endif %}>Boolean</option>
+                      </select>
+                      <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+                    </div>
+                    {% empty %}
+                    <div class="input-group mb-2 timeseries-row">
+                      <input type="text" name="topics[{{ topic_idx }}][devices][{{ device_idx }}][timeseries][0][key]" placeholder="Key" required class="form-control">
+                      <select name="topics[{{ topic_idx }}][devices][{{ device_idx }}][timeseries][0][type]" required class="form-select">
+                        <option value="">Select Type</option>
+                        <option value="String">String</option>
+                        <option value="Integer">Integer</option>
+                        <option value="Double">Double</option>
+                        <option value="Boolean">Boolean</option>
+                      </select>
+                      <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTimeseries(this)">+ Add Timeseries</button>
+                </div>
+                {% empty %}
+                <div class="device-item mb-3 p-2 border rounded" data-device-index="0">
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <input type="text" name="topics[{{ topic_idx }}][devices][0][name]" placeholder="Device Name" required class="form-control w-50">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(this)">Remove Device</button>
+                  </div>
+                  <div class="timeseries-list">
+                    <div class="input-group mb-2 timeseries-row">
+                      <input type="text" name="topics[{{ topic_idx }}][devices][0][timeseries][0][key]" placeholder="Key" required class="form-control">
+                      <select name="topics[{{ topic_idx }}][devices][0][timeseries][0][type]" required class="form-select">
+                        <option value="">Select Type</option>
+                        <option value="String">String</option>
+                        <option value="Integer">Integer</option>
+                        <option value="Double">Double</option>
+                        <option value="Boolean">Boolean</option>
+                      </select>
+                      <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTimeseries(this)">+ Add Timeseries</button>
+                </div>
+                {% endfor %}
+              </div>
+              <button type="button" class="btn btn-success btn-sm mt-2" onclick="addDevice(this)">+ Add Device</button>
+            </div>
+          </div>
+          {% endfor %}
+        {% else %}
+        <div class="topic-item mb-4 p-3 border rounded" data-topic-index="0">
+          <div class="d-flex justify-content-between align-items-center mb-2 topic-header" style="cursor:pointer;">
+            <div>
+              <span class="toggle-arrow">&#9654;</span>
+              <input type="text" name="topics[0][name]" placeholder="Topic Name (e.g. sensor/+/data)" required class="form-control d-inline-block w-200">
+            </div>
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeTopic(this)">Remove Topic</button>
+          </div>
+          <div class="topic-body" style="display:none;">
+            <div class="devices-list">
+              <div class="device-item mb-3 p-2 border rounded" data-device-index="0">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <input type="text" name="topics[0][devices][0][name]" placeholder="Device Name" required class="form-control w-50">
+                  <button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(this)">Remove Device</button>
+                </div>
+                <div class="timeseries-list">
+                  <div class="input-group mb-2 timeseries-row">
+                    <input type="text" name="topics[0][devices][0][timeseries][0][key]" placeholder="Key" required class="form-control">
+                    <select name="topics[0][devices][0][timeseries][0][type]" required class="form-select">
+                      <option value="">Select Type</option>
+                      <option value="String">String</option>
+                      <option value="Integer">Integer</option>
+                      <option value="Double">Double</option>
+                      <option value="Boolean">Boolean</option>
+                    </select>
+                    <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTimeseries(this)">+ Add Timeseries</button>
+              </div>
+            </div>
+            <button type="button" class="btn btn-success btn-sm mt-2" onclick="addDevice(this)">+ Add Device</button>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <button type="button" class="btn btn-primary" onclick="addTopic()">+ Add Topic</button>
+    </div>
+
             <div class="mb-3 form-check">
                 <input class="form-check-input" type="checkbox" name="tls" id="tlsCheck">
                 <label class="form-check-label" for="tlsCheck">Enable TLS/SSL</label>
@@ -281,12 +396,159 @@
 {% if connector.connector_type == 'mqtt' %}
 <script>
 document.addEventListener("DOMContentLoaded", function() {
-    const tlsCheck = document.getElementById('tlsCheck');
-    const tlsFilesSection = document.getElementById('tls-files-section');
-    tlsCheck.addEventListener('change', function() {
-        tlsFilesSection.style.display = this.checked ? "block" : "none";
+  const tlsCheck = document.getElementById('tlsCheck');
+  const tlsFilesSection = document.getElementById('tls-files-section');
+  tlsCheck.addEventListener('change', function() {
+    tlsFilesSection.style.display = this.checked ? "block" : "none";
+  });
+
+  // Initialize collapsed topics
+  document.querySelectorAll('.topic-body').forEach(div => div.style.display = 'none');
+  document.querySelectorAll('.toggle-arrow').forEach(arrow => arrow.innerHTML = "&#9654;");
+
+  // Topic header toggle
+  document.querySelectorAll('.topic-header').forEach(header => {
+    header.addEventListener('click', function(){
+      const topicDiv = header.closest('.topic-item');
+      const body = topicDiv.querySelector('.topic-body');
+      const arrow = header.querySelector('.toggle-arrow');
+      if(body.style.display === 'none' || body.style.display === ''){
+        body.style.display = 'block';
+        arrow.innerHTML = "&#9660;";
+      } else {
+        body.style.display = 'none';
+        arrow.innerHTML = "&#9654;";
+      }
     });
+  });
 });
+
+function addTopic(){
+  const container = document.getElementById('topics-list');
+  const index = container.children.length;
+  const topicHtml = `
+    <div class="topic-item mb-4 p-3 border rounded" data-topic-index="${index}">
+      <div class="d-flex justify-content-between align-items-center mb-2 topic-header" style="cursor:pointer;">
+        <div><span class="toggle-arrow">&#9654;</span>
+          <input type="text" name="topics[${index}][name]" placeholder="Topic Name (e.g. sensor/+/data)" required class="form-control d-inline-block w-200">
+        </div>
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeTopic(this)">Remove Topic</button>
+      </div>
+      <div class="topic-body" style="display:none;">
+        <div class="devices-list">
+          <div class="device-item mb-3 p-2 border rounded" data-device-index="0">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <input type="text" name="topics[${index}][devices][0][name]" placeholder="Device Name" required class="form-control w-50">
+              <button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(this)">Remove Device</button>
+            </div>
+            <div class="timeseries-list">
+              <div class="input-group mb-2 timeseries-row">
+                <input type="text" name="topics[${index}][devices][0][timeseries][0][key]" placeholder="Key" required class="form-control">
+                <select name="topics[${index}][devices][0][timeseries][0][type]" required class="form-select">
+                  <option value="">Select Type</option>
+                  <option value="String">String</option>
+                  <option value="Integer">Integer</option>
+                  <option value="Double">Double</option>
+                  <option value="Boolean">Boolean</option>
+                </select>
+                <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+              </div>
+            </div>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTimeseries(this)">+ Add Timeseries</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-success btn-sm mt-2" onclick="addDevice(this)">+ Add Device</button>
+      </div>
+    </div>`;
+  container.insertAdjacentHTML('beforeend', topicHtml);
+
+  attachmentToggle();
+}
+
+function removeTopic(button){
+  button.closest('.topic-item').remove();
+}
+
+function addDevice(button){
+  const topicDiv = button.closest('.topic-item');
+  const devicesList = topicDiv.querySelector('.devices-list');
+  const deviceIndex = devicesList.children.length;
+  const topicIndex = topicDiv.getAttribute('data-topic-index');
+  const deviceHtml = `
+    <div class="device-item mb-3 p-2 border rounded" data-device-index="${deviceIndex}">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <input type="text" name="topics[${topicIndex}][devices][${deviceIndex}][name]" placeholder="Device Name" required class="form-control w-50">
+        <button type="button" class="btn btn-danger btn-sm" onclick="removeDevice(this)">Remove Device</button>
+      </div>
+      <div class="timeseries-list">
+        <div class="input-group mb-2 timeseries-row">
+          <input type="text" name="topics[${topicIndex}][devices][${deviceIndex}][timeseries][0][key]" placeholder="Key" required class="form-control">
+          <select name="topics[${topicIndex}][devices][${deviceIndex}][timeseries][0][type]" required class="form-select">
+            <option value="">Select Type</option>
+            <option value="String">String</option>
+            <option value="Integer">Integer</option>
+            <option value="Double">Double</option>
+            <option value="Boolean">Boolean</option>
+          </select>
+          <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTimeseries(this)">+ Add Timeseries</button>
+    </div>`;
+  devicesList.insertAdjacentHTML('beforeend', deviceHtml);
+}
+
+function removeDevice(button){
+  button.closest('.device-item').remove();
+}
+
+function addTimeseries(button){
+  const deviceDiv = button.closest('.device-item');
+  const tsList = deviceDiv.querySelector('.timeseries-list');
+  const topicDiv = button.closest('.topic-item');
+  const topicIndex = topicDiv.getAttribute('data-topic-index');
+  const deviceIndex = deviceDiv.getAttribute('data-device-index');
+  const tsIndex = tsList.children.length;
+  const tsHtml = `
+    <div class="input-group mb-2 timeseries-row">
+      <input type="text" name="topics[${topicIndex}][devices][${deviceIndex}][timeseries][${tsIndex}][key]" placeholder="Key" required class="form-control">
+      <select name="topics[${topicIndex}][devices][${deviceIndex}][timeseries][${tsIndex}][type]" required class="form-select">
+        <option value="">Select Type</option>
+        <option value="String">String</option>
+        <option value="Integer">Integer</option>
+        <option value="Double">Double</option>
+        <option value="Boolean">Boolean</option>
+      </select>
+      <button type="button" class="btn btn-outline-danger" onclick="removeTimeseries(this)">&times;</button>
+    </div>`;
+  tsList.insertAdjacentHTML('beforeend', tsHtml);
+}
+
+function removeTimeseries(button){
+  button.closest('.timeseries-row').remove();
+}
+
+// Optional helper to reattach any initialization after adding elements (e.g., toggles)
+function attachmentToggle(){
+  document.querySelectorAll('.topic-header').forEach(header => {
+    if (!header.hasAttribute('data-init-toggle')) {
+      header.addEventListener('click', function(){
+        const topicDiv = header.closest('.topic-item');
+        const body = topicDiv.querySelector('.topic-body');
+        const arrow = header.querySelector('.toggle-arrow');
+        if(body.style.display === 'none' || body.style.display === '') {
+          body.style.display = 'block';
+          arrow.innerHTML = "&#9660;";
+        } else {
+          body.style.display = 'none';
+          arrow.innerHTML = "&#9654;";
+        }
+      });
+      header.setAttribute('data-init-toggle', 'true');
+    }
+  });
+}
+
 </script>
 {% elif connector.connector_type == 'modbus' %}
 <script>

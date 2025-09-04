@@ -72,6 +72,7 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
     OUTBOUND_TYPE_CHOICES = (
         ('mqtt', 'MQTT'),
         ("rest", "REST"),   
+        # ("openadr-ven", "OpenADR-VEN"),   
         ('custom', 'Custom'),
     )
 
@@ -148,9 +149,9 @@ class IHG_MQTTConfiguration(models.Model):
     broker_ip = models.GenericIPAddressField(default='127.0.0.1')
     port = models.PositiveIntegerField(default=1883)
     interval = models.CharField(max_length=20, default="60s",blank=True,null=True)  # e.g., "60s"
-    username = models.CharField(max_length=100, blank=True, null=True)
-    password = models.CharField(max_length=100, blank=True, null=True)
-    topic = models.CharField(max_length=200)
+    username = models.CharField(max_length=100, blank=True, default='')
+    password = models.CharField(max_length=100, blank=True, default='')
+
 
     def __str__(self):
         if self.connector_inbound:
@@ -183,14 +184,44 @@ class IHG_ModbusData(models.Model):
                 # delete oldest extra records
                 ids_to_delete = qs[max_points:].values_list("id", flat=True)
                 IHG_ModbusData.objects.filter(id__in=ids_to_delete).delete()
-  
+
+class IHG_MQTTTopic(models.Model):
+    mqtt_config = models.ForeignKey(
+        IHG_MQTTConfiguration, related_name="topics",
+        on_delete=models.CASCADE
+    )
+    name = models.CharField(max_length=255)  # e.g. "sensor/+/data"
+    def __str__(self):
+        return self.name
+
+class IHG_MQTTDevice(models.Model):
+    topic = models.ForeignKey(
+        IHG_MQTTTopic,
+        related_name="devices",
+        on_delete=models.CASCADE,
+    )
+    device_name = models.CharField(max_length=100)
+    device_id = models.CharField(max_length=100, blank=True, null=True)
+    def __str__(self):
+        return self.device_name
+
+class IHG_MQTTTimeseries(models.Model):
+    device = models.ForeignKey(
+        IHG_MQTTDevice,
+        related_name="timeseries",
+        on_delete=models.CASCADE,
+    )
+    key = models.CharField(max_length=100)
+    type = models.CharField(max_length=20, choices=[
+        ('String', 'String'), ('Integer', 'Integer'), ('Double', 'Double'), ('Boolean', 'Boolean')
+    ])
+
 class IHG_MQTTData(models.Model):
-    config = models.ForeignKey(
-        "IHG_MQTTConfiguration",
+    device = models.ForeignKey(
+        IHG_MQTTDevice,
         on_delete=models.CASCADE,
         related_name="mqtt_data"
     )
-    device_name = models.CharField(max_length=150)
     key = models.CharField(max_length=150)
     value = models.FloatField()
     timestamp = models.DateTimeField(default=timezone.now)
@@ -199,25 +230,19 @@ class IHG_MQTTData(models.Model):
         ordering = ["-timestamp"]
 
     def __str__(self):
-        return f"{self.device_name} | {self.key}={self.value} @ {self.timestamp}"
+        return f"{self.device.device_name} | {self.key}={self.value} @ {self.timestamp}"
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-
-        # --- Enforce maximum_data_points ---
-        connector = None
-        if self.config.connector_inbound:
-            connector = self.config.connector_inbound
+        # If you want to enforce max data points, you must get it from device->connector
+        if self.device and self.device.topic and self.device.topic.mqtt_config:
+            connector = getattr(self.device.topic.mqtt_config, 'connector_inbound', None)
         
-
         if connector:
-           
-            max_points = int(connector.maximum_data_points)
-            if max_points:
-
-                qs = IHG_MQTTData.objects.filter(config=self.config).order_by("-timestamp")
-                count = qs.count()
-                if count > max_points:
-                    ids_to_delete = qs[max_points:].values_list("id", flat=True)
-                    print(f"Deleting {len(ids_to_delete)} old records out of {count} total")
-                    IHG_MQTTData.objects.filter(id__in=ids_to_delete).delete()
+            max_points = int(getattr(connector, "maximum_data_points", 0) or 0)
+        if max_points:
+            qs = IHG_MQTTData.objects.filter(device=self.device).order_by("-timestamp")
+            count = qs.count()
+            if count > max_points:
+                ids_to_delete = qs[max_points:].values_list("id", flat=True)
+                IHG_MQTTData.objects.filter(id__in=ids_to_delete).delete()

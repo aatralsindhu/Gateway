@@ -21,11 +21,17 @@ from Gateway.models import (
     IHG_ModbusData
 )
 import paho.mqtt.client as mqtt
+import paho.mqtt.publish as publish
 import json
 import time
 from datetime import datetime
 import requests
 from django.utils.timezone import now
+import threading
+
+modbus_thread = None
+modbus_thread_stop_event = threading.Event()
+
 
 def publish_to_mqtt(gateway, device_name, connector_id, values):
     try:
@@ -60,8 +66,16 @@ def publish_to_mqtt(gateway, device_name, connector_id, values):
             "errors": {}
         }
 
-        topic = mqtt_config.topic
-        client.publish(topic, json.dumps(payload))
+        topics = mqtt_config.topics.all()
+        for  topic in topics:
+            print("topic",topic.name)
+        #     publish.single(
+        #     topic=topic.name,
+        #     payload=json.dumps(payload),
+        #     hostname=mqtt_config.broker_ip,
+        #     port=mqtt_config.port
+        # )
+            client.publish(topic.name, json.dumps(payload))
         client.disconnect()
         print(f"📤 MQTT Published for {device_name} to topic {topic}")
 
@@ -137,7 +151,7 @@ def read_modbus_timeseries(connector):
                         except Exception as e:
                             print(f"   ❌ REST API error: {e}")
 
-                
+                   
         else:
             print(f"   ❌ Device {device.device_name} connection failed")
             device.device_status = "inactive"
@@ -161,7 +175,7 @@ def gateway_loop():
     """Loop through connectors using their individual interval values."""
     next_run_times = {}
 
-    while True:
+    while not modbus_thread_stop_event.is_set():
         now = datetime.now()
 
         connectors = IHG_InboundConnector.objects.all()
@@ -188,3 +202,22 @@ def gateway_loop():
 
         # Small sleep to avoid CPU 100%
         time.sleep(5)
+
+def start_modbus_loop():
+    global modbus_thread, modbus_thread_stop_event
+    if modbus_thread and modbus_thread.is_alive():
+        print("Stopping existing Modbus thread before starting a new one")
+        stop_modbus_loop()
+    modbus_thread_stop_event.clear()
+    modbus_thread = threading.Thread(target=gateway_loop, daemon=True)
+    modbus_thread.start()
+    print("Modbus loop started")
+
+def stop_modbus_loop():
+    global modbus_thread, modbus_thread_stop_event
+    if modbus_thread and modbus_thread.is_alive():
+        print("Stopping Modbus loop...")
+        modbus_thread_stop_event.set()
+        modbus_thread.join(timeout=10)
+        print("Modbus loop stopped")
+    modbus_thread = None

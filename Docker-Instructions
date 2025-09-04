@@ -1,16 +1,16 @@
 Build the Image
-docker build -t ih_gateway:latest .
+docker build -t ih_gateway:v1  .
 
 Run Locally
-docker run -p 8000:8000 ih_gateway:latest
+docker run -p 8000:8000 ih_gateway:v1 
 
 Push to Docker Hub
-docker tag ih_gateway:latest sindhu812/ih_gateway:latest
-docker push sindhu812/ih_gateway:latest
+docker tag ih_gateway:v1  sindhu812/ih_gateway:v1 
+docker push sindhu812/ih_gateway:v1 
 
 Pull and Run:
-docker pull sindhu812/ih_gateway:latest
-docker run -p 8000:8000 sindhu812/ih_gateway:latest
+docker pull sindhu812/ih_gateway:v1 
+docker run -p 8000:8000 sindhu812/ih_gateway:v1 
 
 
 
