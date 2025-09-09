@@ -4,11 +4,15 @@ from django.contrib import messages
 from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic
 from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm
 import logging
-from Gateway import mqtt,modbus
 from django.db.models import Count, Q, Max
 from django.http import JsonResponse, HttpResponse
-
+from Gateway import modbus, mqtt, openadr_ven
 import csv
+import asyncio
+import os
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
 logger = logging.getLogger(__name__)
 
 def gateway_list(request):
@@ -125,6 +129,7 @@ def edit_inbound_connector(request, connector_pk):
 
         if form.is_valid():
             connector = form.save()
+            gateway_id = connector.gateway.id
 
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
@@ -232,6 +237,16 @@ def edit_inbound_connector(request, connector_pk):
                             )
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
+            try:
+                out_connector = IHG_OutboundConnector.objects.get(gateway=gateway_id)
+                # Assuming 'connector' is your inbound connector instance whose interval you want to copy
+                out_connector.interval = connector.interval
+                out_connector.save(update_fields=["interval"])
+                if out_connector.connector_type == 'openadr-ven':
+                    openadr_ven.start_openadr_ven_loop()
+            except IHG_OutboundConnector.DoesNotExist:
+                print(f"No outbound connector found for gateway {gateway_id}")
+
             messages.success(request, "Inbound connector updated successfully.")
             return redirect('edit_inbound_connector', connector_pk=connector_pk)
 
@@ -286,6 +301,7 @@ def edit_outbound_connector(request, connector_pk):
             connector = form.save()
             gateway_id = connector.gateway.id
             in_connector = IHG_InboundConnector.objects.get(gateway=gateway_id)
+            connector.interval = in_connector.interval
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
                 if mqtt_form.is_valid():
@@ -308,16 +324,37 @@ def edit_outbound_connector(request, connector_pk):
                 connector.rest_method = post_data.get("rest_method", "POST")
                 connector.save(update_fields=["rest_url", "rest_method"])
             elif connector.connector_type == 'openadr-ven':
+                connector.interval = in_connector.interval
                 connector.rest_url = post_data.get("rest_url")
+                cert_file = request.FILES.get("certificate")
+                key_file = request.FILES.get("private_key")
+                print(f"Type of connector.certificate: {type(connector.certificate)}")
+                print(f"Type of connector.private_key: {type(connector.private_key)}")
                 
-                connector.save(update_fields=["rest_url"])
+                if cert_file:
+                    folder_path = os.path.join(settings.BASE_DIR,'Gateway', 'static', 'openadr', str(connector.id))
+                    os.makedirs(folder_path, exist_ok=True)
+                    certificate_path = os.path.join('openadr', str(connector.id), cert_file.name)
+                    connector.certificate.save(certificate_path, cert_file, save=False)
+
+
+                if key_file:
+                    folder_path = os.path.join(settings.BASE_DIR,'Gateway', 'static', 'openadr', str(connector.id))
+                    os.makedirs(folder_path, exist_ok=True)
+                    private_key_path = os.path.join('openadr', str(connector.id), key_file.name)
+                    connector.private_key.save(private_key_path, key_file, save=False)
+
+                
+
+                connector.save(update_fields=["rest_url", "interval", "certificate", "private_key"])
+                openadr_ven.start_openadr_ven_loop()
             if in_connector.connector_type == "modbus":
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
             elif in_connector.connector_type == 'mqtt':
                 mqtt.stop_mqtt_loop()
                 mqtt.start_mqtt_loop()
-
+                    
 
                 
             print('Outbound connector updated.')

@@ -28,9 +28,10 @@ from datetime import datetime
 import requests
 from django.utils.timezone import now
 import threading
-
 modbus_thread = None
 modbus_thread_stop_event = threading.Event()
+from Gateway.openadr_ven import openadr_clients
+
 
 
 def publish_to_mqtt(gateway, device_name, connector_id, values):
@@ -151,7 +152,15 @@ def read_modbus_timeseries(connector):
                         except Exception as e:
                             print(f"   ❌ REST API error: {e}")
 
-                   
+                    elif ob_connector.connector_type == "openadr-ven":
+                       
+                        ven_client = openadr_clients.get(ob_connector.gateway.id)
+                        if ven_client:
+                            for key, val in values_dict.items():
+                                ven_client.update(device.device_name, key, val)
+
+                        else:
+                            print(f"No VEN client found for connector {ob_connector.gateway.id}")
         else:
             print(f"   ❌ Device {device.device_name} connection failed")
             device.device_status = "inactive"

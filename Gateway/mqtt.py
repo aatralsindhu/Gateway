@@ -6,6 +6,7 @@ from Gateway.rest_connector import send_data_to_api
 from datetime import datetime
 import threading
 import paho.mqtt.publish as publish
+from Gateway.openadr_ven import openadr_clients
 
 mqtt_thread = None
 mqtt_thread_stop_event = threading.Event()
@@ -137,9 +138,9 @@ def forward_outbound_data(outbound_connector):
         
     
         auth = {
-    "username": config.username if config.username is not None else "",
-    "password": config.password if config.password is not None else ""
-}
+            "username": config.username if config.username is not None else "",
+            "password": config.password if config.password is not None else ""
+        }
 
         # for topic in topics:
             
@@ -163,6 +164,13 @@ def forward_outbound_data(outbound_connector):
                 qos=0, retain=False
             )      
 
+    elif outbound_connector.connector_type == 'openadr-ven':
+        device_name = payload.get("node")
+        values = payload.get("values", {})
+        ven_client = openadr_clients.get(outbound_connector.gateway.id)
+        if ven_client:
+            for k, v in values.items():
+                ven_client.update(device_name, k, v)
 
 def on_connect(client, userdata, flags, rc):
     connector_id = userdata.get("connector_id")

@@ -72,7 +72,7 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
     OUTBOUND_TYPE_CHOICES = (
         ('mqtt', 'MQTT'),
         ("rest", "REST"),   
-        # ("openadr-ven", "OpenADR-VEN"),   
+        ("openadr-ven", "OpenADR-VEN"),   
         ('custom', 'Custom'),
     )
 
@@ -90,8 +90,23 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
         max_length=10,
         choices=[("GET", "GET"), ("POST", "POST")],
         default="POST"
+    ),
+    certificate = models.FileField(
+    upload_to='Gateway/static/',
+    blank=True,
+    null=True,
+    default=None,
+    verbose_name="Certificate File"
+    )
+    private_key = models.FileField(
+        upload_to='Gateway/static/',
+        blank=True,
+        null=True,
+        default=None,
+        verbose_name="Private Key File"
     )
 
+    
     class Meta:
         verbose_name = "Outbound Connector"
         verbose_name_plural = "Outbound Connectors"

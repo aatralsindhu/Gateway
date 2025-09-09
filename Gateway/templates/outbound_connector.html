@@ -147,6 +147,21 @@
         <label class="form-label" for="vtnUrlInput">VTN URL</label>
         <input type="url" id="vtnUrlInput" name="rest_url" class="form-control" value="{{ connector.rest_url|default_if_none:'' }}" required>
     </div>
+    <div class="mb-3">
+    <label class="form-label" for="certificateInput">Certificate File</label>
+    <input type="file" id="certificateInput" name="certificate" class="form-control">
+    {% if connector.certificate %}
+        <small>Current file: {{ connector.certificate.name }}</small>
+    {% endif %}
+</div>
+
+<div class="mb-3">
+    <label class="form-label" for="privateKeyInput">Private Key File</label>
+    <input type="file" id="privateKeyInput" name="private_key" class="form-control">
+    {% if connector.private_key %}
+        <small>Current file: {{ connector.private_key.name }}</small>
+    {% endif %}
+</div>
 
             {% endif %}
 
