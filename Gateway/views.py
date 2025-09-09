@@ -324,6 +324,15 @@ def edit_outbound_connector(request, connector_pk):
                 connector.rest_method = post_data.get("rest_method", "POST")
                 connector.save(update_fields=["rest_url", "rest_method"])
             elif connector.connector_type == 'openadr-ven':
+                if 'remove_certificate' in request.POST:
+                    if connector.certificate:
+                        connector.certificate.delete(save=False)  # Deletes the file from storage
+                        connector.certificate = None
+        
+                if 'remove_private_key' in request.POST:
+                    if connector.private_key:
+                        connector.private_key.delete(save=False)
+                        connector.private_key = None
                 connector.interval = in_connector.interval
                 connector.rest_url = post_data.get("rest_url")
                 cert_file = request.FILES.get("certificate")

@@ -13,10 +13,13 @@ openadr_thread_stop_event = threading.Event()
 openadr_clients = {}  # Map gateway_id → VEN client instance
 
 class OpenADRVenClient:
-    def __init__(self, ven_name, vtn_url,sampling_interval_seconds=5):
+    def __init__(self, ven_name, vtn_url,sampling_interval_seconds=5,conn=None):
         self.ven_name = ven_name
         self.vtn_url = vtn_url
-        self.client = OpenADRClient(ven_name=self.ven_name, vtn_url=self.vtn_url)
+        cert_file_path = conn.certificate.path if conn.certificate else None
+        key_file_path = conn.private_key.path if conn.private_key else None
+        print("cert_file_path",cert_file_path)
+        self.client = OpenADRClient(ven_name=self.ven_name, vtn_url=self.vtn_url,cert=cert_file_path,key=key_file_path)
         self.report_cache = {}  # {measurement_key: latest_value}
         self.registered_reports = set()
         self.sampling_interval = sampling_interval_seconds
@@ -95,7 +98,7 @@ async def start_ven_clients():
     clients = []
     for conn in connectors:
         sampling_interval = int(conn.interval or 5)  # use connector's configured interval or default 5s
-        ven_client = OpenADRVenClient(conn.name, conn.rest_url, sampling_interval_seconds=sampling_interval)
+        ven_client = OpenADRVenClient(conn.name, conn.rest_url, sampling_interval_seconds=sampling_interval,conn=conn)
         openadr_clients[conn.gateway.id] = ven_client
         conn.status = 'active'
         await sync_to_async(conn.save)()
