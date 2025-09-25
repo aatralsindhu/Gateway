@@ -168,7 +168,22 @@
             <label for="remove_private_key">Remove current private key file</label>
         {% endif %}
     </div>
+        {% elif connector.connector_type == "ocpp" %}
+    <div class="mb-3">
+        <label class="form-label" for="wsUrlInput">WebSocket URL</label>
+        <input type="url" id="wsUrlInput" name="rest_url" class="form-control"
+               value="{{ connector.rest_url|default_if_none:'' }}" required>
+        <small class="form-text text-muted">Enter the OCPP WebSocket server URL, e.g. ws://ip:port/ocpp</small>
+    </div>
 
+    <div class="mb-3">
+        <label class="form-label" for="chargePointIdInput">Charge Point ID</label>
+        <input type="text" id="chargePointIdInput" name="charge_point_id" class="form-control"
+               value="{{ connector.charge_point_id|default_if_none:'' }}" required>
+        <small class="form-text text-muted">Unique identifier for this OCPP charge point</small>
+    </div>
+
+    
             {% endif %}
 
             <button type="submit" class="btn btn-primary w-100">Save Configuration</button>

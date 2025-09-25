@@ -31,6 +31,7 @@ path("api/gateways/", views.api_gateways, name="api_gateways"),
         path("api/monitor/filters/", views.monitor_filters, name="monitor_filters"),
     path("api/monitor/data/", views.monitor_data, name="monitor_data"),
     path("api/monitor/csv/", views.monitor_csv, name="export-monitor-csv"),
+    
 
 
 

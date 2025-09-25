@@ -6,13 +6,13 @@ from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTT
 import logging
 from django.db.models import Count, Q, Max
 from django.http import JsonResponse, HttpResponse
-from Gateway import modbus, mqtt, openadr_ven
+from Gateway import modbus, mqtt, openadr_ven, ocpp_connector
 import csv
 import asyncio
 import os
 from django.conf import settings
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
+
+
 logger = logging.getLogger(__name__)
 
 def gateway_list(request):
@@ -357,6 +357,13 @@ def edit_outbound_connector(request, connector_pk):
 
                 connector.save(update_fields=["rest_url", "interval", "certificate", "private_key"])
                 openadr_ven.start_openadr_ven_loop()
+            if connector.connector_type == 'ocpp':
+                connector.rest_url = request.POST.get("rest_url", "").strip()
+                connector.charge_point_id = request.POST.get("charge_point_id", "").strip()
+                connector.save()
+                ocpp_connector.stop_ocpp_clients()
+                ocpp_connector.start_ocpp_clients()
+
             if in_connector.connector_type == "modbus":
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
@@ -443,132 +450,6 @@ def add_timeseries(request, connector_pk):
         messages.success(request, 'Timeseries added successfully.')
     return redirect('gateway_app:edit_inbounf_connector', connector_pk=connector_pk)
 
-
-
-# def import_gateway_config(request, gateway_id):
-#     gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
-
-#     try:
-#         file_data = request.FILES['config_file'].read().decode('utf-8')
-#         config_json = json.loads(file_data)
-#         IHG_InboundConnector.objects.filter(gateway=gateway, connector_type='modbus', is_inbound=True).delete()
-#         IHG_OutboundConnector.objects.filter(gateway=gateway, connector_type='mqtt').delete()
-
-#         # --- Handle Modbus Inputs (Inbound Connectors) ---
-#         modbus_inputs = config_json.get('inputs', {}).get('modbus', [])
-#         for mb in modbus_inputs:
-#             inbound, created = IHG_InboundConnector.objects.get_or_create(
-#                 gateway=gateway,
-#                 name=mb.get('name'),
-#                 defaults={
-#                     'connector_type': 'modbus',
-#                     'is_inbound': True,
-#                     'configuration': mb
-#                 }
-#             )
-#             # Update configuration if already exists
-#             if not created:
-#                 inbound.configuration = mb
-#                 inbound.save()
-
-#             # Create Device(s) from tags if available
-#             tags = mb.get('tags', {})
-#             controller = mb.get('controller', [])
-#             print("controller",controller)
-#             if controller and controller.startswith('tcp://'):
-#                 # extract IP and port
-#                 ip_port = controller[6:]  # after tcp://
-#                 print("ip_port",ip_port)
-#                 if ':' in ip_port:
-#                     ip, port_str = ip_port.split(':', 1)
-#                     port = int(port_str)
-#                 else:
-#                     ip = ip_port
-#                     port = 0000
-#             else:
-#                 ip = '127.0.0.1'
-#                 port = 0000
-#             device_id = tags.get('device_id')
-#             device_name = tags.get('device_name')
-
-#             if device_id and device_name:
-#                 device, _ = Device.objects.get_or_create(
-#                     connector=inbound,
-#                     device_id=device_id,
-#                     device_ip=ip,
-#                     device_port=port,
-#                     defaults={'device_name': device_name}
-#                 )
-#             else:
-#                 device = None  # No device info provided, skip timeseries
-
-#             # Save holding registers as Timeseries linked to Device
-#             if device:
-#                 for reg in mb.get('holding_registers', []):
-#                     IHG_Timeseries.objects.update_or_create(
-#                         device=device,
-#                         name=reg.get('name'),
-#                         defaults={
-#                             'scale': float(reg.get('scale', 1.0)),
-#                             'address': ",".join(map(str, reg.get('address', []))),
-#                             'byte_order': reg.get('byte_order'),
-#                             'data_type': reg.get('data_type'),
-#                         }
-#                     )
-
-#         # --- Handle MQTT Outputs (Outbound Connectors) ---
-#         mqtt_outputs = config_json.get('outputs', {}).get('mqtt', [])
-#         for mqtt in mqtt_outputs:
-#             # Use a unique name for outbound connector (e.g. client_id or topic)
-#             name = f"Mqtt{mqtt.get('qos')}"
-
-
-#             outbound, created = IHG_OutboundConnector.objects.get_or_create(
-#                 gateway=gateway,
-#                 name=name,
-#                 defaults={
-#                     'connector_type': 'mqtt',
-#                     'is_inbound': False,
-#                     'configuration': mqtt
-#                 }
-#             )
-#             # Update configuration if exists
-#             if not created:
-#                 outbound.configuration = mqtt
-#                 outbound.save()
-
-#             # Update or create MQTT configuration
-#             server_url = mqtt.get('servers', [None])[0]
-#             if server_url and server_url.startswith('tcp://'):
-#                 ip_port = server_url[6:]
-#                 if ':' in ip_port:
-#                     ip, port_str = ip_port.split(':', 1)
-#                     port = int(port_str)
-#                 else:
-#                     ip = ip_port
-#                     port = 1883
-#             else:
-#                 ip = '127.0.0.1'
-#                 port = 1883
-
-#             IHG_MQTTConfiguration.objects.update_or_create(
-#                 connector=outbound,
-#                 defaults={
-#                     'broker_ip': ip,
-#                     'port': port,
-#                     'interval': '60s',  # default, adjust if config has it
-#                     'username': mqtt.get('username'),
-#                     'password': mqtt.get('password'),
-#                     'topic': mqtt.get('topic', ''),
-#                 }
-#             )
-
-#         messages.success(request, "Configuration imported successfully.")
-
-#     except Exception as e:
-#         messages.error(request, f"Error importing configuration: {e}")
-
-#     return redirect('gateway_detail', pk=gateway_id)
 
 def import_gateway_config(request, gateway_id):
     gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
@@ -786,66 +667,117 @@ def api_latest_data(request, device_id):
     )
     return JsonResponse({"data": list(latest_data)})
 
-from django.db.models import OuterRef, Subquery
-from django.db.models.functions import Coalesce
 
 from django.db.models import OuterRef, Subquery, Q
 
-def get_devices_data_for_gateway(gateway_id,device_id=None):
-    # Get all devices for gateway
-    print("devices",gateway_id,device_id)
-    if device_id:
-        devices=Device.objects.filter(connector__gateway_id=gateway_id,id=device_id)
+from django.db.models import OuterRef, Subquery, Max
+
+def get_devices_data_for_gateway(gateway_id, device_id=None):
+    print("devices", gateway_id, device_id)
+
+    connectors = IHG_InboundConnector.objects.filter(gateway_id=gateway_id)
+    connector_type = None
+
+    # Pick first connector's type (consider improving to handle multiple types if needed)
+    for connector in connectors:
+        print("connector", connector.connector_type)
+        connector_type = connector.connector_type
+        break
+
+    devices = Device.objects.none()  # default empty queryset
+
+    if connector_type == 'modbus':
+        if device_id:
+            devices = Device.objects.filter(connector__gateway_id=gateway_id, id=device_id)
+        else:
+            devices = Device.objects.filter(connector__gateway_id=gateway_id)
+
+        # Latest non-null modbus data per timeseries
+        latest_modbus = IHG_ModbusData.objects.filter(
+            timeseries=OuterRef('pk'),
+            value__isnull=False
+        ).order_by('-timestamp')
+
+        # Annotate each timeseries with latest value and timestamp
+        timeseries_with_latest = IHG_Timeseries.objects.filter(
+            device__in=devices
+        ).annotate(
+            latest_value=Subquery(latest_modbus.values('value')[:1]),
+            latest_timestamp=Subquery(latest_modbus.values('timestamp')[:1])
+        ).filter(
+            latest_value__isnull=False
+        ).select_related('device')
+
+        # Annotate devices with last communication time (max timestamp of all modbus data)
+        last_comm_qs = IHG_ModbusData.objects.filter(
+            timeseries__device=OuterRef('pk'),
+            value__isnull=False
+        ).order_by().values('timeseries__device').annotate(
+            last_comm=Max('timestamp')
+        ).values('last_comm')
+
+        devices = devices.annotate(
+            last_communication=Subquery(last_comm_qs[:1])
+        )
+
+        # Build a dict of device last communication times keyed by device id
+        device_last_comm = {d.id: d.last_communication for d in devices}
+
+        # Build flat list for frontend
+        result = []
+        for ts in timeseries_with_latest:
+            last_comm = device_last_comm.get(ts.device_id)
+            result.append({
+                "device_name": ts.device.device_name,
+                "key": ts.name,
+                "value": ts.latest_value,
+                "last_update_time": ts.latest_timestamp.isoformat() if ts.latest_timestamp else None,
+                "device_last_communication": last_comm.isoformat() if last_comm else None,
+            })
+
+        return result
+
+    elif connector_type == 'mqtt':
+        # For MQTT, get MQTT devices and latest MQTT data
+        from .models import IHG_MQTTData, IHG_MQTTDevice
+
+        if device_id:
+            mqtt_devices = IHG_MQTTDevice.objects.filter(id=device_id)
+        else:
+            # MQTT devices for this gateway by traversing inbound connectors
+            inbound_connector_ids = connectors.values_list('id', flat=True)
+            mqtt_devices = IHG_MQTTDevice.objects.filter(
+                topic__mqtt_config__connector_inbound__in=inbound_connector_ids
+            )
+
+        # Annotate devices with last communication time (max timestamp of all MQTT data)
+        last_comm_qs = IHG_MQTTData.objects.filter(
+            device=OuterRef('pk')
+        ).order_by().values('device').annotate(
+            last_comm=Max('timestamp')
+        ).values('last_comm')
+
+        mqtt_devices = mqtt_devices.annotate(
+            last_communication=Subquery(last_comm_qs[:1])
+        )
+
+        result = []
+        for device in mqtt_devices:
+            # Get latest mqtt data for device
+            latest_data_qs = IHG_MQTTData.objects.filter(device=device).order_by('-timestamp')[:10]
+            for d in latest_data_qs:
+                result.append({
+                    "device_name": device.device_name,
+                    "key": d.key,
+                    "value": d.value,
+                    "last_update_time": d.timestamp.isoformat(),
+                    "device_last_communication": device.last_communication.isoformat() if device.last_communication else None,
+                })
+        return result
+
     else:
-        devices = Device.objects.filter(connector__gateway_id=gateway_id)
-    print("devices",devices)
-
-
-    # Annotate each device with its last communication time (max timestamp from modbus data)
-    last_comm_qs = IHG_ModbusData.objects.filter(
-        timeseries__device=OuterRef('pk'),
-        value__isnull=False
-    ).order_by().values('timeseries__device').annotate(
-        last_comm=Max('timestamp')
-    ).values('last_comm')
-
-    devices = devices.annotate(
-        last_communication=Subquery(last_comm_qs[:1])
-    )
-
-    # Latest non-null modbus data per timeseries
-    latest_modbus = IHG_ModbusData.objects.filter(
-        timeseries=OuterRef('pk'),
-        value__isnull=False
-    ).order_by('-timestamp')
-
-    # Annotate each timeseries with latest value and timestamp
-    timeseries_with_latest = IHG_Timeseries.objects.filter(
-        device__in=devices
-    ).annotate(
-        latest_value=Subquery(latest_modbus.values('value')[:1]),
-        latest_timestamp=Subquery(latest_modbus.values('timestamp')[:1])
-    ).filter(
-        latest_value__isnull=False
-    ).select_related('device')
-
-    # Build flat list for frontend
-    result = []
-
-    # Build a dict of device last communication times for quick lookup
-    device_last_comm = {d.device_name: d.last_communication for d in devices}
-
-    for ts in timeseries_with_latest:
-        last_comm = device_last_comm.get(ts.device.device_name)
-        result.append({
-            "device_name": ts.device.device_name,
-            "key": ts.name,
-            "value": ts.latest_value,
-            "last_update_time": ts.latest_timestamp.isoformat() if ts.latest_timestamp else None,
-            "device_last_communication": last_comm.isoformat() if last_comm else None,  # Include device last comm time
-        })
-
-    return result
+        # Connector type not modbus or mqtt; return empty
+        return []
 
 
 def monitor_filters(request):
@@ -896,7 +828,8 @@ def monitor_csv(request):
 
     # Get devices under this gateway
     devices_qs = Device.objects.filter(connector__gateway=gateway)
-
+    ds=devices_qs.connector.connector_type
+    print("devices_qs",ds)
     if device_id:
         devices_qs = devices_qs.filter(id=device_id)
 

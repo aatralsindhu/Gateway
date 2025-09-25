@@ -28,9 +28,13 @@ from datetime import datetime
 import requests
 from django.utils.timezone import now
 import threading
+import asyncio
 modbus_thread = None
 modbus_thread_stop_event = threading.Event()
 from Gateway.openadr_ven import openadr_clients
+from Gateway.ocpp_connector import ocpp_clients 
+from Gateway.mappings import measurand_mapping
+
 
 
 
@@ -161,7 +165,28 @@ def read_modbus_timeseries(connector):
 
                         else:
                             print(f"No VEN client found for connector {ob_connector.gateway.id}")
-        else:
+                    elif ob_connector.connector_type == "ocpp":
+                        ocpp_client = ocpp_clients.get(ob_connector.gateway.id)
+                        if ocpp_client:
+                            # Prepare the meter data for OCPP format
+                            meter_data = []
+                            timestamp = datetime.utcnow().isoformat() + 'Z'  # UTC ISO format with Zulu time
+                            for key, val in values_dict.items():
+                                mapped = measurand_mapping.get(key.lower(), {'measurand': 'Energy.Active.Import.Register', 'unit': 'Wh'})
+                                meter_data.append({
+                                    'timestamp': timestamp,
+                                    'value': val,
+                                    'unit': mapped['unit'],
+                                    'measurand': mapped['measurand']
+                                })
+                            
+                            
+                            asyncio.run_coroutine_threadsafe(
+                        ocpp_client.send_meter_values(meter_data, device.device_name),
+                        ocpp_client.loop
+                        )
+                            
+        else:   
             print(f"   ❌ Device {device.device_name} connection failed")
             device.device_status = "inactive"
             device.save(update_fields=["device_status"])

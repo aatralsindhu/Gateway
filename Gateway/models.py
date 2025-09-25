@@ -49,7 +49,6 @@ class IHG_InboundConnector(IHG_ConnectorBase):
     INBOUND_TYPE_CHOICES = (
         ('modbus', 'Modbus'),
         ('mqtt', 'MQTT'),
-        ('rest', 'REST'),
         ('custom', 'Custom')
     )
 
@@ -72,7 +71,8 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
     OUTBOUND_TYPE_CHOICES = (
         ('mqtt', 'MQTT'),
         ("rest", "REST"),   
-        ("openadr-ven", "OpenADR-VEN"),   
+        ("openadr-ven", "OpenADR-VEN"), 
+        ("ocpp", "OCPP"),  
         ('custom', 'Custom'),
     )
 
@@ -105,7 +105,12 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
         default=None,
         verbose_name="Private Key File"
     )
-
+    charge_point_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name="OCPP Charge Point ID"
+    )
     
     class Meta:
         verbose_name = "Outbound Connector"
