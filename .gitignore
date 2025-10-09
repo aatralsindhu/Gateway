@@ -1,0 +1,17 @@
+# Ignore Python bytecode
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environments
+venv/
+.env/
+*.egg-info/
+
+# Ignore Django stuff
+*.sqlite3
+/staticfiles/
+/media/
+
+# Ignore IDE/editor configs
+.vscode/
+.idea/
