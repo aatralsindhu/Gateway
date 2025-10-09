@@ -142,6 +142,24 @@
                     <option value="GET" {% if connector.rest_method == 'GET' %}selected{% endif %}>GET</option>
                 </select>
             </div>
+            {% elif connector.connector_type == "file" %}
+            <div class="mb-3">
+                <label class="form-label" for="filePathInput">File Path</label>
+                <input
+                type="text"
+                id="filePathInput"
+                name="file_path"
+                class="form-control"
+                value="{{ connector.file_path|default_if_none:'' }}"
+                required
+                placeholder="Enter file path"
+                pattern=".*\.json$"
+                title="File path must end with .json"
+                >
+            </div>
+
+
+
             {% elif connector.connector_type == "openadr-ven" %}
              <div class="mb-3">
         <label class="form-label" for="vtnUrlInput">VTN URL</label>

@@ -1,12 +1,19 @@
 import time
 import json
 import paho.mqtt.client as mqtt
-from Gateway.models import IHG_MQTTConfiguration ,IHG_OutboundConnector,IHG_InboundConnector,IHG_MQTTData,IHG_MQTTDevice
+from Gateway.models import IHG_MQTTConfiguration ,IHG_OutboundConnector,IHG_InboundConnector,IHG_MQTTData,IHG_MQTTDevice,Rule
 from Gateway.rest_connector import send_data_to_api
 from datetime import datetime
 import threading
 import paho.mqtt.publish as publish
 from Gateway.openadr_ven import openadr_clients
+from Gateway.ocpp_connector import ocpp_clients 
+from Gateway.mappings import measurand_mapping
+import asyncio
+from django.db import connection
+
+
+
 
 mqtt_thread = None
 mqtt_thread_stop_event = threading.Event()
@@ -171,6 +178,52 @@ def forward_outbound_data(outbound_connector):
         if ven_client:
             for k, v in values.items():
                 ven_client.update(device_name, k, v)
+    elif outbound_connector.connector_type == 'ocpp':
+        ocpp_client = ocpp_clients.get(outbound_connector.gateway.id)
+        if ocpp_client:
+            # Prepare the meter data for OCPP format
+            meter_data = []
+            timestamp = datetime.utcnow().isoformat() + 'Z'  # UTC ISO format with Zulu time
+            device_name = payload.get("node")
+            values = payload.get("values", {})
+            for key, val in values.items():
+                mapped = measurand_mapping.get(key.lower(), {'measurand': 'Energy.Active.Import.Register', 'unit': 'Wh'})
+                meter_data.append({
+                    'timestamp': timestamp,
+                    'value': val,
+                    'unit': mapped['unit'],
+                    'measurand': mapped['measurand']
+                })
+            
+            
+            asyncio.run_coroutine_threadsafe(
+        ocpp_client.send_meter_values(meter_data, device_name),
+        ocpp_client.loop
+        )
+    elif outbound_connector.connector_type == 'file':
+        outbound_connector.status = 'active'
+        outbound_connector.save(update_fields=["status"])
+        in_connector = IHG_InboundConnector.objects.get(gateway=outbound_connector.gateway)
+        rules = Rule.objects.filter(stream=in_connector)
+        if not rules.exists() or rules.actions == "inactive":
+            file_path = outbound_connector.file_path
+            print("file_path",file_path)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        else:
+
+            for rule in rules:
+                sql = rule.sql
+                with connection.cursor() as cursor:
+                    cursor.execute(sql)
+                    # fetch results if needed
+                    rows = cursor.fetchall()
+                    column_names = [desc[0] for desc in cursor.description]
+
+                    # build list of dicts with column_name: value mapping
+                    results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(results_with_columns, f, ensure_ascii=False, indent=2)
 
 def on_connect(client, userdata, flags, rc):
     connector_id = userdata.get("connector_id")

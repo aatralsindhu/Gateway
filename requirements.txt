@@ -6,4 +6,7 @@ psycopg2-binary
 whitenoise
 requests
 openleadr
+ocpp
+websockets
+pysnmp
 

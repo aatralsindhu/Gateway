@@ -31,8 +31,13 @@ path("api/gateways/", views.api_gateways, name="api_gateways"),
         path("api/monitor/filters/", views.monitor_filters, name="monitor_filters"),
     path("api/monitor/data/", views.monitor_data, name="monitor_data"),
     path("api/monitor/csv/", views.monitor_csv, name="export-monitor-csv"),
+ 
+ path('gateway/<int:gateway_id>/rulechain/', views.rulechain_view, name='rulechain_view'),
+    path('gateway/<int:gateway_id>/rulechain/save/', views.save_rulechain, name='save_rulechain'),
+    path('rules/<int:gateway_id>/', views.rule_list, name='rule_list'),
+    path('rules/create/<int:gateway_id>/', views.rule_create, name='rule_create'),
+    path('rule_edit/<int:pk>/', views.rule_edit, name='rule_edit'),
+    path('rule_delete/<int:pk>/', views.rule_delete, name='rule_delete'),
+    path('rules/toggle_active/<int:pk>/', views.toggle_rule_active, name='toggle_rule_active'),
     
-
-
-
 ]

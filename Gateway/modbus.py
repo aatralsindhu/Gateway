@@ -1,4 +1,5 @@
 import time
+from django.db import connection
 from datetime import datetime, timedelta
 from pymodbus.client import ModbusTcpClient
 from Gateway.models import (
@@ -8,7 +9,7 @@ from Gateway.models import (
     Device,
     IHG_Timeseries,
     IHG_ModbusData,
-    IHG_Gateway,
+    IHG_Gateway, Rule
 )
 import json
 import paho.mqtt.client as mqtt
@@ -83,9 +84,10 @@ def publish_to_mqtt(gateway, device_name, connector_id, values):
             client.publish(topic.name, json.dumps(payload))
         client.disconnect()
         print(f"📤 MQTT Published for {device_name} to topic {topic}")
-
+        
     except Exception as e:
         print(f"❌ MQTT publish failed for {device_name}: {e}")
+        
 
 def read_modbus_timeseries(connector):
     """Read Modbus timeseries for a single connector."""
@@ -116,6 +118,7 @@ def read_modbus_timeseries(connector):
                         print(f"      ⚠ Error reading {ts.name}")
                         continue
                     value = result.registers[0] * ts.scale
+                    insert_timeseries_value(connector.name, device.device_name, ts.name, value)
                     IHG_ModbusData.objects.create(timeseries=ts, value=value)
                     values_dict[ts.name] = value
                     print(f"      📊 TS {ts.name} = {value}")
@@ -130,34 +133,81 @@ def read_modbus_timeseries(connector):
                 for ob_connector in outbound_connectors:
                     if ob_connector.connector_type == "mqtt":
                         print(f"   📤 Publishing to MQTT via {ob_connector.name}")
-                        publish_to_mqtt(
-                            gateway=connector.gateway,
-                            device_name=device.device_name,
-                            connector_id=connector.connector_id,
-                            values=values_dict
-                        )
+                        rules = Rule.objects.filter(stream=connector)
+                        if not rules.exists() or rules.actions == "inactive":
+                            publish_to_mqtt(
+                                gateway=connector.gateway,
+                                device_name=device.device_name,
+                                connector_id=connector.connector_id,
+                                values=values_dict
+                            )
+                        else:
+                            for rule in rules:
+                                sql = rule.sql
+                                with connection.cursor() as cursor:
+                                    try:
+                                        cursor.execute(sql)
+                                        # fetch results if needed
+                                        rows = cursor.fetchall()
+                                        column_names = [desc[0] for desc in cursor.description]
+
+                                        # build list of dicts with column_name: value mapping
+                                        results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                    except Exception as e:
+                                        print(f"   ❌ SQL execution error: {e}")
+                                        results_with_columns = e
+                                    publish_to_mqtt(
+                                        gateway=connector.gateway,
+                                        device_name=device.device_name,
+                                        connector_id=connector.connector_id,
+                                        values=results_with_columns
+                                    )
+
 
                     elif ob_connector.connector_type == "rest":
                         try:
-                            payload = {
+                            rules = Rule.objects.filter(stream=connector)
+                            if not rules.exists() or rules.actions == "inactive":
+                                payload = {
                                 "gateway": connector.gateway.name,
                                 "device": device.device_name,
                                 "connector_id": str(connector.connector_id),
                                 "values": values_dict
                             }
-                            print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+                                print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+                                
+                                if ob_connector.rest_method == "POST":
+                                    resp = requests.post(ob_connector.rest_url, json=payload, timeout=10)
+                                else:  # GET
+                                    resp = requests.get(ob_connector.rest_url, params=payload, timeout=10)
 
-                            if ob_connector.rest_method == "POST":
-                                resp = requests.post(ob_connector.rest_url, json=payload, timeout=10)
-                            else:  # GET
-                                resp = requests.get(ob_connector.rest_url, params=payload, timeout=10)
+                            else:
 
+                                for rule in rules:
+                                    sql = rule.sql
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(sql)
+                                        # fetch results if needed
+                                        rows = cursor.fetchall()
+                                        column_names = [desc[0] for desc in cursor.description]
+
+                                        # build list of dicts with column_name: value mapping
+                                        results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                        print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+
+                                        resp = requests.post(ob_connector.rest_url, json=results_with_columns, timeout=10)
+                                        
+                            
                             print(f"   ✅ REST Response {resp.status_code}: {resp.text}")
+                            ob_connector.status = 'active'
+                            ob_connector.save(update_fields=["status"])
                         except Exception as e:
                             print(f"   ❌ REST API error: {e}")
+                            ob_connector.status = 'inactive'
+                            ob_connector.save(update_fields=["status"])
 
                     elif ob_connector.connector_type == "openadr-ven":
-                       
+                        
                         ven_client = openadr_clients.get(ob_connector.gateway.id)
                         if ven_client:
                             for key, val in values_dict.items():
@@ -185,7 +235,31 @@ def read_modbus_timeseries(connector):
                         ocpp_client.send_meter_values(meter_data, device.device_name),
                         ocpp_client.loop
                         )
-                            
+                    elif ob_connector.connector_type == 'file':
+                        ob_connector.status = 'active'
+                        ob_connector.save(update_fields=["status"])
+                        rules = Rule.objects.filter(stream=connector)
+                        if not rules.exists() or rules.actions == "inactive":
+                            file_path = ob_connector.file_path
+                            print("file_path",file_path)
+                            with open(file_path, 'w', encoding='utf-8') as f:
+                                json.dump(values_dict, f, ensure_ascii=False, indent=2)
+                        else:
+
+                            for rule in rules:
+                                sql = rule.sql
+                                with connection.cursor() as cursor:
+                                    cursor.execute(sql)
+                                    # fetch results if needed
+                                    rows = cursor.fetchall()
+                                    column_names = [desc[0] for desc in cursor.description]
+
+                                    # build list of dicts with column_name: value mapping
+                                    results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                with open(file_path, 'w', encoding='utf-8') as f:
+                                    json.dump(results_with_columns, f, ensure_ascii=False, indent=2)
+
+     
         else:   
             print(f"   ❌ Device {device.device_name} connection failed")
             device.device_status = "inactive"
@@ -204,6 +278,15 @@ def read_modbus_timeseries(connector):
         gateway.status = "inactive"
     gateway.save(update_fields=["status"])
 
+
+def insert_timeseries_value(connector_table, device_name, ts_name, value):
+    # Sanitize connector_table & ts_name to valid SQL identifiers, beware SQL injection
+
+    with connection.cursor() as cursor:
+        # Insert new row (simplified)
+        cursor.execute(f"""
+        INSERT INTO {connector_table} (device_id, "{ts_name}") VALUES (%s, %s);
+        """, [device_name, value])
 
 def gateway_loop():
     """Loop through connectors using their individual interval values."""

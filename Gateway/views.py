@@ -1,18 +1,23 @@
 import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
-from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic
-from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm
+from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic,RuleChain,Rule,IHG_SNMP_Timeseries
+from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm,RuleForm
 import logging
 from django.db.models import Count, Q, Max
 from django.http import JsonResponse, HttpResponse
-from Gateway import modbus, mqtt, openadr_ven, ocpp_connector
+from Gateway import modbus, mqtt, openadr_ven, ocpp_connector,snmp_connector
 import csv
 import asyncio
 import os
 from django.conf import settings
-
-
+from django.views.decorators.csrf import csrf_exempt
+from django.core.serializers.json import DjangoJSONEncoder
+from django.shortcuts import render, get_object_or_404, redirect
+from django.views.decorators.http import require_http_methods
+from django.urls import reverse
+from django.http import HttpResponseForbidden
+from django.db import connection
 logger = logging.getLogger(__name__)
 
 def gateway_list(request):
@@ -111,6 +116,12 @@ def get_mqtt_data_nested(mqtt_config):
             'devices': devices_dict,
         }
     return topics_dict
+
+def column_exists(table_name, column_name):
+    with connection.cursor() as cursor:
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        columns = [row[1] for row in cursor.fetchall()]  # column names are in second column
+    return column_name in columns
 
 def edit_inbound_connector(request, connector_pk):
     connector = get_object_or_404(IHG_InboundConnector, pk=connector_pk)
@@ -235,8 +246,78 @@ def edit_inbound_connector(request, connector_pk):
                                 byte_order=ts_byte_orders[t].strip(),
                                 data_type=ts_data_types[t].strip()
                             )
+                            with connection.cursor() as cursor:
+                                print("name",ts_names[t].strip())
+                                if not column_exists(connector.name, ts_names[t].strip()):
+                                    cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{ts_names[t].strip()}" FLOAT;')
+
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
+            elif connector.connector_type == 'snmp':
+                community = request.POST.get('community', 'public')
+                
+                connector.configuration= community
+                
+                connector.save(update_fields=['configuration'])
+                connector.devices.all().delete()
+                device_keys = [key for key in request.POST.keys() if key.startswith('devices-') and key.endswith('-name')]
+                device_indices = sorted(set(key.split('-')[1] for key in device_keys))
+
+                for di in device_indices:
+                    name = request.POST.get(f'devices-{di}-name', '').strip()
+                    ip = request.POST.get(f'devices-{di}-ip', '').strip()
+                    port = request.POST.get(f'devices-{di}-port', '').strip()
+                    if not (name and ip and port):
+                        continue
+
+                    device = Device.objects.create(
+                        connector=connector,
+                        device_name=name,
+                        device_ip=ip,
+                        device_port=int(port)
+                    )
+
+                    # Handle OIDs of the device
+                    oid_keys = [key for key in request.POST.keys()
+                                if key.startswith(f'devices-{di}-oids-') and key.endswith('-key')]
+                    oid_indices = sorted(set(key.split('-')[3] for key in oid_keys))
+
+                    for oi in oid_indices:
+                        key_val = request.POST.get(f'devices-{di}-oids-{oi}-key', '').strip()
+                        type_val = request.POST.get(f'devices-{di}-oids-{oi}-type', '').strip()
+                        oid_val = request.POST.get(f'devices-{di}-oids-{oi}-oid', '').strip()
+                        method_val = request.POST.get(f'devices-{di}-oids-{oi}-method', '').strip()
+
+                        if not key_val:
+                            continue
+
+                        IHG_SNMP_Timeseries.objects.create(
+                            device=device,
+                            name=key_val,
+                            datatype=type_val or 'STRING',
+                            address=oid_val,
+                            method=method_val or 'GET'
+                        )
+                        with connection.cursor() as cursor:
+                                print("name",key_val)
+                                snmp_type_to_sql = {
+                                'STRING': 'VARCHAR(255)',
+                                'INTEGER': 'INTEGER',
+                                'COUNTER': 'BIGINT',
+                                'GAUGE': 'BIGINT',
+                                'TIMETICKS': 'BIGINT',
+                                'OID': 'VARCHAR(255)',
+                                'FLOAT': 'DOUBLE PRECISION',
+                                'TABLE': 'TEXT '
+                            }
+
+                     
+                                sql_type = snmp_type_to_sql.get(type_val.upper(), 'VARCHAR(255)')
+                                if not column_exists(connector.name,key_val):
+                                    cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{key_val}" {sql_type};')
+                snmp_connector.stop_snmp_loop()
+                snmp_connector.start_snmp_loop()
+                
             try:
                 out_connector = IHG_OutboundConnector.objects.get(gateway=gateway_id)
                 # Assuming 'connector' is your inbound connector instance whose interval you want to copy
@@ -252,8 +333,10 @@ def edit_inbound_connector(request, connector_pk):
 
     else:
         form = InboundConnectorForm(instance=connector)
-
-    devices = Device.objects.filter(connector=connector).prefetch_related('timeseries')
+    if connector.connector_type == "snmp":
+        devices = Device.objects.filter(connector=connector).prefetch_related('snmp_timeseries')
+    else:
+        devices = Device.objects.filter(connector=connector).prefetch_related('timeseries')
     return render(request, 'inbound_connector.html', {
         'connector': connector,
         'devices': devices,
@@ -321,8 +404,9 @@ def edit_outbound_connector(request, connector_pk):
             elif connector.connector_type == "rest":
                 
                 connector.rest_url = post_data.get("rest_url")
-                connector.rest_method = post_data.get("rest_method", "POST")
-                connector.save(update_fields=["rest_url", "rest_method"])
+                print("1111111111111",post_data.get("rest_method"))
+                connector.rest_method = post_data.get("rest_method")
+                connector.save(update_fields=["rest_url","rest_method"])
             elif connector.connector_type == 'openadr-ven':
                 if 'remove_certificate' in request.POST:
                     if connector.certificate:
@@ -333,6 +417,7 @@ def edit_outbound_connector(request, connector_pk):
                     if connector.private_key:
                         connector.private_key.delete(save=False)
                         connector.private_key = None
+
                 connector.interval = in_connector.interval
                 connector.rest_url = post_data.get("rest_url")
                 cert_file = request.FILES.get("certificate")
@@ -357,13 +442,16 @@ def edit_outbound_connector(request, connector_pk):
 
                 connector.save(update_fields=["rest_url", "interval", "certificate", "private_key"])
                 openadr_ven.start_openadr_ven_loop()
-            if connector.connector_type == 'ocpp':
+            elif connector.connector_type == 'ocpp':
                 connector.rest_url = request.POST.get("rest_url", "").strip()
                 connector.charge_point_id = request.POST.get("charge_point_id", "").strip()
                 connector.save()
                 ocpp_connector.stop_ocpp_clients()
                 ocpp_connector.start_ocpp_clients()
-
+            elif connector.connector_type == 'file':
+                connector.file_path = request.POST.get("file_path", "").strip()
+                connector.status = 'active'
+                connector.save()
             if in_connector.connector_type == "modbus":
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
@@ -854,3 +942,140 @@ def monitor_csv(request):
                 ])
 
     return response
+
+def rulechain_view(request, gateway_id):
+    gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+    rulechain, _ = RuleChain.objects.get_or_create(gateway=gateway)
+
+    # Check if a saved rulechain is present and has nodes/edges data
+    has_saved_flow = bool(rulechain.nodes and rulechain.edges)
+
+    if has_saved_flow:
+        nodes = json.loads(rulechain.nodes)
+        edges = json.loads(rulechain.edges)
+    else:
+        nodes = []
+        inbound_connectors = gateway.inbound_connectors.all()
+        outbound_connectors = gateway.outbound_connectors.all()
+        x_inbound = 120
+        y_start = 100
+        y_gap = 70
+        for i, c in enumerate(inbound_connectors):
+            nodes.append({
+                "id": c.id,
+                "type": c.connector_type,
+                "x": x_inbound,
+                "y": y_start + i * y_gap,
+                "label": c.connector_type
+            })
+        x_outbound = 350
+        for j, c in enumerate(outbound_connectors):
+            nodes.append({
+                "id": c.id,
+                "type": c.connector_type,
+                "x": x_outbound,
+                "y": y_start + j * y_gap,
+                "label": c.connector_type
+            })
+        edges = []
+        for in_c in inbound_connectors:
+            for out_c in outbound_connectors:
+                edges.append({
+                    "from": in_c.id,
+                    "to": out_c.id
+                })
+
+    nodes_json = json.dumps(nodes, cls=DjangoJSONEncoder)
+    edges_json = json.dumps(edges, cls=DjangoJSONEncoder)
+
+    return render(request, 'rulechain_flow.html', {
+        'gateway': gateway,
+        'rulechain': rulechain,
+        'nodes_json': nodes_json,
+        'edges_json': edges_json,
+        'has_saved_flow': has_saved_flow
+    })
+
+@csrf_exempt  # or use csrf token management in AJAX headers
+def save_rulechain(request, gateway_id):
+    if request.method == 'POST':
+        gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+        try:
+            data = json.loads(request.body)
+            nodes = data.get('nodes', [])
+            edges = data.get('edges', [])
+
+            # Save nodes and edges to your models here:
+            # Example (you need to define your own save logic/model updates):
+            rulechain, _ = RuleChain.objects.get_or_create(gateway=gateway)
+            rulechain.nodes = json.dumps(nodes)   # store as JSON string or model relations
+            rulechain.edges = json.dumps(edges)
+            rulechain.save()
+
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid method'})
+
+
+def rule_list(request,gateway_id):
+    
+    gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+    inboundconnectors = IHG_InboundConnector.objects.filter(gateway=gateway)
+    rules = Rule.objects.filter(stream__gateway=gateway)
+    return render(request, 'rules/list.html', {'rules': rules, 'gateway': gateway,'inboundconnectors':inboundconnectors})
+
+def rule_create(request, gateway_id):
+    if request.method == 'POST':
+        form = RuleForm(request.POST, gateway_id=gateway_id)
+        if form.is_valid():
+            rule = form.save()
+            # get gateway for redirect based on selected stream
+            gateway_id = rule.stream.gateway.id
+            return redirect('rule_list', gateway_id=gateway_id)
+    else:
+        form = RuleForm(gateway_id=gateway_id)
+
+    return render(request, 'rules/form.html', {'form': form})
+
+@require_http_methods(["GET", "POST"])
+def rule_edit(request, pk):
+    rule = get_object_or_404(Rule, pk=pk)
+    gateway_id = rule.stream.gateway.id if rule.stream and rule.stream.gateway else None
+
+    if request.method == "POST":
+        form = RuleForm(request.POST, instance=rule, gateway_id=gateway_id)
+        if form.is_valid():
+            form.save()
+            return redirect('rule_list', gateway_id=gateway_id)
+    else:
+        form = RuleForm(instance=rule, gateway_id=gateway_id)
+
+    return render(request, "rules/rule_edit.html", {"form": form, "rule": rule, "gateway_id": gateway_id})
+
+@require_http_methods(["POST"])
+def rule_delete(request, pk):
+    rule = get_object_or_404(Rule, pk=pk)
+    # You can add permission checks here
+    if request.method == "POST":
+        rule.delete()
+        return redirect(reverse('rule_list'))
+    else:
+        return HttpResponseForbidden("Invalid request method.")
+
+def toggle_rule_active(request, pk):
+    rule_to_toggle = get_object_or_404(Rule, pk=pk)
+    # current_active = rule_to_toggle.actions.get('active', False) if rule_to_toggle.actions else False
+
+    if rule_to_toggle.actions == 'inactive':
+        actions = 'active'
+        
+    else:
+            
+        actions = 'inactive'
+        
+    rule_to_toggle.actions = actions
+    rule_to_toggle.save(update_fields=['actions'])
+    
+    return JsonResponse({'status': 'success', 'active_rule_id': rule_to_toggle.id})
+
