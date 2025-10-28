@@ -56,14 +56,15 @@
     </div>
     <div class="col-md-4">
       <div class="kpi-card">
-        <div class="kpi-title">Devices</div>
-        <div class="kpi-value" id="kpiDevices">—</div>
+        <div class="kpi-title">Total Connectors</div>
+        <div class="kpi-value" id="kpiConnectors">—</div>
       </div>
     </div>
+    
     <div class="col-md-4">
       <div class="kpi-card">
-        <div class="kpi-title">Active Devices</div>
-        <div class="kpi-value" id="kpiActiveDevices">—</div>
+        <div class="kpi-title">Active Connectors</div>
+        <div class="kpi-value" id="kpiActiveConnectors">—</div>
       </div>
     </div>
   </div>
@@ -75,15 +76,12 @@
         <select id="filterGateway" class="form-select" required>
           <option value="">Select Gateway...</option>
         </select>
+      
         <select id="filterDevice" class="form-select">
           <option value="">All Devices</option>
         </select>
         <input id="filterSearch" class="form-control" placeholder="Search key/value..." style="min-width:220px;">
-        <select id="filterLimit" class="form-select" style="width:120px;">
-          <option value="25">25 rows</option>
-          <option value="50" selected>50 rows</option>
-          <option value="100">100 rows</option>
-        </select>
+        
         <div class="ms-auto d-flex gap-2">
           <div class="form-check form-switch align-self-center">
             <input class="form-check-input" type="checkbox" id="autoRefresh" checked>
@@ -132,11 +130,10 @@ async function loadFilters() {
   const res = await fetch(API_FILTERS);
   const payload = await res.json();
   populateSelect('filterGateway', payload.gateways, 'id', 'name');
-  populateSelect('filterDevice', payload.devices, 'device_name', 'device_name', true);
   if (payload.meta) {
-    document.getElementById('kpiGateways').innerText = payload.meta.gateways || payload.gateways.length;
-    document.getElementById('kpiDevices').innerText = payload.meta.devices || payload.devices.length;
-    document.getElementById('kpiActiveDevices').innerText = payload.meta.active_devices ?? '—';
+    document.getElementById('kpiGateways').innerText = payload.meta.gateways ;
+    document.getElementById('kpiConnectors').innerText = payload.meta.connectors ;
+    document.getElementById('kpiActiveConnectors').innerText = payload.meta.active_connectors_count ?? '—';
   }
   // Auto-select first gateway and load data
   if (payload.gateways.length > 0) {
@@ -166,35 +163,35 @@ function populateSelect(id, arr, valueKey, labelKey, includeAll=false) {
 
 
 function renderRows(flatData) {
-  const tbody = document.getElementById('monitorRows');
-  if (!flatData.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No data to display.</div></td></tr>`;
-    return;
-  }
-
-  // Group by device_name
-  const grouped = flatData.reduce((acc, item) => {
-    if (!acc[item.device_name]) {
-      acc[item.device_name] = [];
+    const tbody = document.getElementById('monitorRows');
+    if (!flatData.length) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No data to display.</div></td></tr>`;
+        return;
     }
-    acc[item.device_name].push(item);
-    return acc;
-  }, {});
-
-  tbody.innerHTML = '';
-
-  Object.entries(grouped).forEach(([deviceName, metrics]) => {
-    metrics.forEach(metric => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${metric.device_name}</td>
-        <td>${metric.key}</td>
-        <td>${metric.value !== null ? metric.value : '—'}</td>
-        <td>${metric.last_update_time ? fmtTime(metric.last_update_time) : '—'}</td>
-      `;
-      tbody.appendChild(tr);
+    tbody.innerHTML = '';
+    // Group by device_name
+    const grouped = flatData.reduce((acc, item) => {
+        if (!acc[item.device_name]) acc[item.device_name] = [];
+        acc[item.device_name].push(item);
+        return acc;
+    }, {});
+    Object.entries(grouped).forEach(([deviceName, metrics]) => {
+        metrics.forEach(metric => {
+            // Filter out None (null) values except for id, timestamp, device_id
+            Object.keys(metric).forEach(key => {
+                if (['id', 'timestamp', 'device_id', 'device_name'].includes(key)) return; // Always show
+                if (metric[key] == null) return; // Skip None values
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${metric.device_id}</td>
+                    <td>${key}</td>
+                    <td>${metric[key]}</td>
+                    <td>${metric.timestamp ? fmtTime(metric.timestamp) : ''}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        });
     });
-  });
 }
 
 function startAutoRefresh() {
@@ -212,8 +209,7 @@ async function exportCSV() {
   if (!gateway) return alert('Select a gateway first.');
   const device = document.getElementById('filterDevice').value;
   const q = document.getElementById('filterSearch').value.trim();
-  const limit = document.getElementById('filterLimit').value || '50';
-  const params = new URLSearchParams({ gateway, limit });
+  const params = new URLSearchParams({ gateway });
   if (device) params.append('device', device);
   if (q) params.append('q', q);
 
@@ -243,7 +239,7 @@ document.getElementById('filterGateway').addEventListener('change', () => {
 });
 document.getElementById('filterDevice').addEventListener('change', loadData);
 document.getElementById('filterSearch').addEventListener('input', loadData);
-document.getElementById('filterLimit').addEventListener('change', loadData);
+
 document.getElementById('btnRefresh').addEventListener('click', loadData);
 document.getElementById('btnExport').addEventListener('click', exportCSV);
 document.getElementById('autoRefresh').addEventListener('change', startAutoRefresh);
@@ -257,8 +253,8 @@ async function loadData() {
   }
   const device = document.getElementById('filterDevice').value;
   const q = document.getElementById('filterSearch').value.trim();
-  const limit = document.getElementById('filterLimit').value || '50';
-  const params = new URLSearchParams({ gateway, limit });
+
+  const params = new URLSearchParams({ gateway });
   if (device) params.append('device', device);
   if (q) params.append('q', q);
 
@@ -279,7 +275,7 @@ async function loadDevicesForGateway() {
         const payload = await res.json();
 
         if (payload.devices && payload.devices.length > 0) {
-            populateSelect('filterDevice', payload.devices, 'id', 'device_name', true);
+            populateSelect('filterDevice', payload.devices, 'device_name', 'device_name', true);
         } else {
             // No devices
             const sel = document.getElementById('filterDevice');

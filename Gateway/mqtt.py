@@ -103,19 +103,61 @@ def on_message(client, userdata, msg):
                     print(f'Created new cache for device {device_name}')
                 else:
                     print(f'Using existing cache for device {device_name}')
+                if allowed_keys is not None:
+                    values_dict = {k: v for k, v in values.items() if k in allowed_keys}
+                max_points = int(inbound_connector.maximum_data_points) if inbound_connector.maximum_data_points else None
 
-                # Filter and update only defined keys
+                insert_timeseries_value(inbound_connector.name, device_name,values_dict,max_points)
+
                 for k, v in values.items():
                     if k in allowed_keys:
+
                         device_cache[k] = v
-                        IHG_MQTTData.objects.create(
-                        device=device_obj,
-                        key=k,
-                        value=v,
-                        timestamp=timestamp,
-                    )
+                    #     IHG_MQTTData.objects.create(
+                    #     device=device_obj,
+                    #     key=k,
+                    #     value=v,
+                    #     timestamp=timestamp,
+                    # )
                 print("device_cache",device_cache)
+
+def insert_timeseries_value(connector_table, device_name,  values_dict,max_points):
+    # Sanitize connector_table & ts_name to valid SQL identifiers, beware SQL injection
+
+    with connection.cursor() as cursor:
+        # Insert new row (simplified)
         
+        columns = ", ".join(values_dict.keys())
+        placeholders = ", ".join(["%s"] * (len(values_dict) + 1))  # +1 for device_name
+
+        # Include device_id (or device_name) as first column
+        sql = f'INSERT INTO "{connector_table}" (device_id, {columns}) VALUES ({placeholders});'
+        print("mqttsql",sql)
+        # Parameter list: device_name first, then all the values
+        params = [device_name] + list(values_dict.values())
+
+        cursor.execute(sql, params)
+        connection.commit()
+        if max_points:
+            # Delete oldest rows beyond max_points
+            cursor.execute(f'SELECT COUNT(*) FROM "{connector_table}";')
+            row_count = cursor.fetchone()[0]
+
+            # Calculate how many rows to delete
+            excess = row_count - max_points
+            if excess > 0:
+                # Delete the oldest `excess` rows
+                sql_delete = f"""
+                    DELETE FROM "{connector_table}"
+                    WHERE id IN (
+                        SELECT id FROM "{connector_table}"
+                        ORDER BY timestamp ASC
+                        LIMIT ?
+                    );
+                """
+                cursor.execute(sql_delete, [excess])
+
+
         
 def forward_outbound_data(outbound_connector):
     print(f"🔄 Preparing data for outbound connector: {outbound_connector.name}")
@@ -135,8 +177,28 @@ def forward_outbound_data(outbound_connector):
     # Send based on outbound type
     if outbound_connector.connector_type == 'rest':
         print("payload",payload)
-        if mqtt_clients !=[]:
-            send_data_to_api(outbound_connector.rest_url, payload, outbound_connector.id)
+        in_connector = IHG_InboundConnector.objects.get(gateway=outbound_connector.gateway)
+        rules = Rule.objects.filter(stream=in_connector)
+        if not rules.exists() or rules.actions == "inactive":
+            if mqtt_clients !=[]:
+                send_data_to_api(outbound_connector.rest_url, payload, outbound_connector.id)
+        
+        else:
+
+            for rule in rules:
+                sql = rule.sql
+                with connection.cursor() as cursor:
+                    cursor.execute(sql)
+                    # fetch results if needed
+                    rows = cursor.fetchall()
+                    column_names = [desc[0] for desc in cursor.description]
+
+                    # build list of dicts with column_name: value mapping
+                    results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                if mqtt_clients !=[]:
+                    send_data_to_api(outbound_connector.rest_url, results_with_columns, outbound_connector.id)
+
+        
 
     elif outbound_connector.connector_type == 'mqtt':
         config = outbound_connector.mqtt_config

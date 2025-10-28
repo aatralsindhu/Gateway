@@ -118,13 +118,15 @@ def read_modbus_timeseries(connector):
                         print(f"      ⚠ Error reading {ts.name}")
                         continue
                     value = result.registers[0] * ts.scale
-                    insert_timeseries_value(connector.name, device.device_name, ts.name, value)
-                    IHG_ModbusData.objects.create(timeseries=ts, value=value)
+                    # IHG_ModbusData.objects.create(timeseries=ts, value=value)
                     values_dict[ts.name] = value
                     print(f"      📊 TS {ts.name} = {value}")
                 except Exception as e:
                     print(f"      ❌ Error reading TS {ts.id}: {e}")
-                    
+            max_points = int(connector.maximum_data_points) if connector.maximum_data_points else None
+
+                   
+            insert_timeseries_value(connector.name, device.device_name,values_dict,max_points)
 
             client.close()
             if values_dict:
@@ -279,14 +281,41 @@ def read_modbus_timeseries(connector):
     gateway.save(update_fields=["status"])
 
 
-def insert_timeseries_value(connector_table, device_name, ts_name, value):
+def insert_timeseries_value(connector_table, device_name,  values_dict,max_points):
     # Sanitize connector_table & ts_name to valid SQL identifiers, beware SQL injection
 
     with connection.cursor() as cursor:
         # Insert new row (simplified)
-        cursor.execute(f"""
-        INSERT INTO {connector_table} (device_id, "{ts_name}") VALUES (%s, %s);
-        """, [device_name, value])
+        columns = ", ".join(values_dict.keys())
+        placeholders = ", ".join(["%s"] * (len(values_dict) + 1))  # +1 for device_name
+
+        # Include device_id (or device_name) as first column
+        sql = f'INSERT INTO "{connector_table}" (device_id, {columns}) VALUES ({placeholders});'
+
+        # Parameter list: device_name first, then all the values
+        params = [device_name] + list(values_dict.values())
+
+        cursor.execute(sql, params)
+        if max_points:
+            # Delete oldest rows beyond max_points
+            cursor.execute(f'SELECT COUNT(*) FROM "{connector_table}";')
+            row_count = cursor.fetchone()[0]
+
+            # Calculate how many rows to delete
+            excess = row_count - max_points
+            if excess > 0:
+                # Delete the oldest `excess` rows
+                sql_delete = f"""
+                    DELETE FROM "{connector_table}"
+                    WHERE id IN (
+                        SELECT id FROM "{connector_table}"
+                        ORDER BY timestamp ASC
+                        LIMIT ?
+                    );
+                """
+                cursor.execute(sql_delete, [excess])
+
+
 
 def gateway_loop():
     """Loop through connectors using their individual interval values."""

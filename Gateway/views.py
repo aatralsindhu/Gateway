@@ -204,6 +204,11 @@ def edit_inbound_connector(request, connector_pk):
                                         key=ts_key,
                                         type=ts_type if ts_type else 'String',
                                     )
+                                    with connection.cursor() as cursor:
+                                        print("name",ts_key.strip())
+                                        if not column_exists(connector.name, ts_key.strip()):
+                                            cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{ts_key.strip()}" FLOAT;')
+
                 mqtt.stop_mqtt_loop()
                 mqtt.start_mqtt_loop()
             elif connector.connector_type == "modbus":
@@ -716,29 +721,38 @@ def api_connectors(request, gateway_id):
 # 3. Get all Devices for a Connector
 def api_devices(request, gateway_id):
     connectors = IHG_InboundConnector.objects.filter(gateway_id=gateway_id)
+    
     if connectors.filter(connector_type="modbus").exists():
+        
         devices = list(
             Device.objects.filter(connector__gateway_id=gateway_id)
             .values("id", "device_name", "device_status")
         )
-        print(devices,devices)
+        print("device_names..",devices)
         return JsonResponse({"devices": devices})
 
     # Otherwise, if any connector is mqtt
     elif connectors.filter(connector_type="mqtt").exists():
+        print(11111111111111111111)
         # Get MQTT configs linked to inbound connectors of this gateway
         mqtt_configs = IHG_MQTTConfiguration.objects.filter(connector_inbound__gateway_id=gateway_id)
-        # Find distinct device names in the mqtt data tied to these configs
+        print("mqtt_configs__",mqtt_configs)
         device_names = (
-            IHG_MQTTData.objects
-            .filter(config__in=mqtt_configs)
-            .values_list("id","device_name", flat=True)
+            IHG_MQTTDevice.objects
+            .filter(topic__mqtt_config__in=mqtt_configs)
+            .values("id","device_name")
             .distinct()
         )
-        print("device_names",list(device_names))
+        print("device_names...",list(device_names))
         return JsonResponse({"devices": list(device_names)})
-
-    return JsonResponse({"devices": devices})
+    
+    elif connectors.filter(connector_type="snmp").exists():
+        devices = list(
+            Device.objects.filter(connector__gateway_id=gateway_id)
+            .values("id", "device_name")
+        )
+        print("device_names..",devices)
+        return JsonResponse({"devices": devices})
 
 
 # 4. Get latest Modbus data for a Device
@@ -763,104 +777,44 @@ from django.db.models import OuterRef, Subquery, Max
 def get_devices_data_for_gateway(gateway_id, device_id=None):
     print("devices", gateway_id, device_id)
 
-    connectors = IHG_InboundConnector.objects.filter(gateway_id=gateway_id)
-    connector_type = None
+    connector = IHG_InboundConnector.objects.get(gateway_id=gateway_id)
+    table_name = connector.name.lower().replace("-", "_")
+    if device_id:
+        sql = f"""
+        SELECT t.*
+        FROM "{table_name}" t
+        INNER JOIN (
+            SELECT device_id, MAX(timestamp) AS max_ts
+            FROM "{table_name}" where device_id = '{device_id}'
+            GROUP BY device_id
+        ) latest
+        ON t.device_id = latest.device_id AND t.timestamp = latest.max_ts
+        ORDER BY t.device_id;
+    """
+    else:
+        sql = f"""
+        SELECT t.*
+        FROM "{table_name}" t
+        INNER JOIN (
+            SELECT device_id, MAX(timestamp) AS max_ts
+            FROM "{table_name}" 
+            GROUP BY device_id
+        ) latest
+        ON t.device_id = latest.device_id AND t.timestamp = latest.max_ts
+        ORDER BY t.device_id;
+    """
 
-    # Pick first connector's type (consider improving to handle multiple types if needed)
-    for connector in connectors:
-        print("connector", connector.connector_type)
-        connector_type = connector.connector_type
-        break
+    print("sql__",sql)
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
 
-    devices = Device.objects.none()  # default empty queryset
-
-    if connector_type == 'modbus':
-        if device_id:
-            devices = Device.objects.filter(connector__gateway_id=gateway_id, id=device_id)
-        else:
-            devices = Device.objects.filter(connector__gateway_id=gateway_id)
-
-        # Latest non-null modbus data per timeseries
-        latest_modbus = IHG_ModbusData.objects.filter(
-            timeseries=OuterRef('pk'),
-            value__isnull=False
-        ).order_by('-timestamp')
-
-        # Annotate each timeseries with latest value and timestamp
-        timeseries_with_latest = IHG_Timeseries.objects.filter(
-            device__in=devices
-        ).annotate(
-            latest_value=Subquery(latest_modbus.values('value')[:1]),
-            latest_timestamp=Subquery(latest_modbus.values('timestamp')[:1])
-        ).filter(
-            latest_value__isnull=False
-        ).select_related('device')
-
-        # Annotate devices with last communication time (max timestamp of all modbus data)
-        last_comm_qs = IHG_ModbusData.objects.filter(
-            timeseries__device=OuterRef('pk'),
-            value__isnull=False
-        ).order_by().values('timeseries__device').annotate(
-            last_comm=Max('timestamp')
-        ).values('last_comm')
-
-        devices = devices.annotate(
-            last_communication=Subquery(last_comm_qs[:1])
-        )
-
-        # Build a dict of device last communication times keyed by device id
-        device_last_comm = {d.id: d.last_communication for d in devices}
-
-        # Build flat list for frontend
-        result = []
-        for ts in timeseries_with_latest:
-            last_comm = device_last_comm.get(ts.device_id)
-            result.append({
-                "device_name": ts.device.device_name,
-                "key": ts.name,
-                "value": ts.latest_value,
-                "last_update_time": ts.latest_timestamp.isoformat() if ts.latest_timestamp else None,
-                "device_last_communication": last_comm.isoformat() if last_comm else None,
-            })
-
-        return result
-
-    elif connector_type == 'mqtt':
-        # For MQTT, get MQTT devices and latest MQTT data
-        from .models import IHG_MQTTData, IHG_MQTTDevice
-
-        if device_id:
-            mqtt_devices = IHG_MQTTDevice.objects.filter(id=device_id)
-        else:
-            # MQTT devices for this gateway by traversing inbound connectors
-            inbound_connector_ids = connectors.values_list('id', flat=True)
-            mqtt_devices = IHG_MQTTDevice.objects.filter(
-                topic__mqtt_config__connector_inbound__in=inbound_connector_ids
-            )
-
-        # Annotate devices with last communication time (max timestamp of all MQTT data)
-        last_comm_qs = IHG_MQTTData.objects.filter(
-            device=OuterRef('pk')
-        ).order_by().values('device').annotate(
-            last_comm=Max('timestamp')
-        ).values('last_comm')
-
-        mqtt_devices = mqtt_devices.annotate(
-            last_communication=Subquery(last_comm_qs[:1])
-        )
-
-        result = []
-        for device in mqtt_devices:
+    if rows:
+        result = [dict(zip(columns, row)) for row in rows]
+        print("result___",result)
             # Get latest mqtt data for device
-            latest_data_qs = IHG_MQTTData.objects.filter(device=device).order_by('-timestamp')[:10]
-            for d in latest_data_qs:
-                result.append({
-                    "device_name": device.device_name,
-                    "key": d.key,
-                    "value": d.value,
-                    "last_update_time": d.timestamp.isoformat(),
-                    "device_last_communication": device.last_communication.isoformat() if device.last_communication else None,
-                })
+            
         return result
 
     else:
@@ -870,17 +824,20 @@ def get_devices_data_for_gateway(gateway_id, device_id=None):
 
 def monitor_filters(request):
     gateways = list(IHG_Gateway.objects.values("id", "name"))
-    devices = list(Device.objects.values("id", "device_name"))
+    inboundconnectors = list(IHG_InboundConnector.objects.values("id", "name"))
+    outboundconnectors = list(IHG_OutboundConnector.objects.values("id", "name"))
 
-    active_devices_count = Device.objects.filter(device_status="active").count()
+    active_inboundconnectors_count = IHG_InboundConnector.objects.filter(status="active").count()
+    active_outboundconnector_count = IHG_OutboundConnector.objects.filter(status="active").count()
 
     return JsonResponse({
-        "gateways": gateways,
-        "devices": devices,
+        "gateways":gateways,
         "meta": {
             "gateways": len(gateways),
-            "devices": len(devices),
-            "active_devices": active_devices_count
+            "connectors": len(inboundconnectors) + len(outboundconnectors),
+            "outboundconnectors": len(outboundconnectors),
+            "active_connectors_count": (active_inboundconnectors_count+active_outboundconnector_count),
+            
         }
     })
 
@@ -904,7 +861,7 @@ def monitor_data(request):
 def monitor_csv(request):
     gateway_id = request.GET.get("gateway")
     device_id = request.GET.get("device", "").strip()
-    limit = int(request.GET.get("limit", "50"))
+    
 
     if not gateway_id:
         return HttpResponse("Missing gateway parameter", status=400)
@@ -931,7 +888,7 @@ def monitor_csv(request):
     for device in devices_qs:
         timeseries_qs = device.timeseries.all()
         for ts in timeseries_qs:
-            modbus_data = ts.modbus_data.all()[:limit]  # latest N values
+            modbus_data = ts.modbus_data.all()  # latest N values
             for row in modbus_data:
                 writer.writerow([
                     gateway.name,

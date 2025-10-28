@@ -224,6 +224,8 @@ def send_data_to_outbound_connector(results,connector):
 
 def snmp_loop(connector):
     snmp = SNMPConnector(connector)
+    max_points = int(connector.maximum_data_points) if connector.maximum_data_points else None
+
     while not snmp_thread_stop_events[connector.id].is_set():
         results = snmp.poll_all_devices(connector)
         # print(f"Results for connector {connector.id}: {results}")
@@ -244,6 +246,24 @@ def snmp_loop(connector):
 
                     sql = f'INSERT INTO "{connector.name}" ({", ".join(columns)}) VALUES ({", ".join(placeholders)});'
                     cursor.execute(sql, values)
+                if max_points:
+                    cursor.execute(f'SELECT COUNT(*) FROM "{connector.name}";')
+                    row_count = cursor.fetchone()[0]
+
+                    # Calculate how many rows to delete
+                    excess = row_count - max_points
+                    if excess > 0:
+                        # Delete the oldest `excess` rows
+                        sql_delete = f"""
+                            DELETE FROM "{connector.name}"
+                            WHERE id IN (
+                                SELECT id FROM "{connector.name}"
+                                ORDER BY timestamp ASC
+                                LIMIT ?
+                            );
+                        """
+                        cursor.execute(sql_delete, [excess])
+
             print(f"   ✅ Data inserted into table {connector.name}")
         except Exception as e:  
             print (f"   ❌ Database insert error: {e}")
