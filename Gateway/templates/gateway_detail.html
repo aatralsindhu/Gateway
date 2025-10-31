@@ -141,6 +141,7 @@ h2 {
     <div class="mb-4">
         <a href="{% url 'add_inbound_connector' gateway.id %}" class="btn btn-info me-2">+ Add Inbound Connector</a>
         <a href="{% url 'add_outbound_connector' gateway.id %}" class="btn btn-warning">+ Add Outbound Connector</a>
+        <a href="{% url 'rule_list' gateway.id %}" class="btn btn-primary"> Rules</a>
     </div>
 
     <!-- Inbound Connectors Section -->

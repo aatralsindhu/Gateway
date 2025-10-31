@@ -1,4 +1,5 @@
 import time
+from django.db import connection
 from datetime import datetime, timedelta
 from pymodbus.client import ModbusTcpClient
 from Gateway.models import (
@@ -8,7 +9,7 @@ from Gateway.models import (
     Device,
     IHG_Timeseries,
     IHG_ModbusData,
-    IHG_Gateway,
+    IHG_Gateway, Rule
 )
 import json
 import paho.mqtt.client as mqtt
@@ -28,9 +29,14 @@ from datetime import datetime
 import requests
 from django.utils.timezone import now
 import threading
-
+import asyncio
 modbus_thread = None
 modbus_thread_stop_event = threading.Event()
+from Gateway.openadr_ven import openadr_clients
+from Gateway.ocpp_connector import ocpp_clients 
+from Gateway.mappings import measurand_mapping
+
+
 
 
 def publish_to_mqtt(gateway, device_name, connector_id, values):
@@ -78,9 +84,10 @@ def publish_to_mqtt(gateway, device_name, connector_id, values):
             client.publish(topic.name, json.dumps(payload))
         client.disconnect()
         print(f"📤 MQTT Published for {device_name} to topic {topic}")
-
+        
     except Exception as e:
         print(f"❌ MQTT publish failed for {device_name}: {e}")
+        
 
 def read_modbus_timeseries(connector):
     """Read Modbus timeseries for a single connector."""
@@ -111,12 +118,15 @@ def read_modbus_timeseries(connector):
                         print(f"      ⚠ Error reading {ts.name}")
                         continue
                     value = result.registers[0] * ts.scale
-                    IHG_ModbusData.objects.create(timeseries=ts, value=value)
+                    # IHG_ModbusData.objects.create(timeseries=ts, value=value)
                     values_dict[ts.name] = value
                     print(f"      📊 TS {ts.name} = {value}")
                 except Exception as e:
                     print(f"      ❌ Error reading TS {ts.id}: {e}")
-                    
+            max_points = int(connector.maximum_data_points) if connector.maximum_data_points else None
+
+                   
+            insert_timeseries_value(connector.name, device.device_name,values_dict,max_points)
 
             client.close()
             if values_dict:
@@ -125,34 +135,134 @@ def read_modbus_timeseries(connector):
                 for ob_connector in outbound_connectors:
                     if ob_connector.connector_type == "mqtt":
                         print(f"   📤 Publishing to MQTT via {ob_connector.name}")
-                        publish_to_mqtt(
-                            gateway=connector.gateway,
-                            device_name=device.device_name,
-                            connector_id=connector.connector_id,
-                            values=values_dict
-                        )
+                        rules = Rule.objects.filter(stream=connector)
+                        if not rules.exists() or rules.actions == "inactive":
+                            publish_to_mqtt(
+                                gateway=connector.gateway,
+                                device_name=device.device_name,
+                                connector_id=connector.connector_id,
+                                values=values_dict
+                            )
+                        else:
+                            for rule in rules:
+                                sql = rule.sql
+                                with connection.cursor() as cursor:
+                                    try:
+                                        cursor.execute(sql)
+                                        # fetch results if needed
+                                        rows = cursor.fetchall()
+                                        column_names = [desc[0] for desc in cursor.description]
+
+                                        # build list of dicts with column_name: value mapping
+                                        results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                    except Exception as e:
+                                        print(f"   ❌ SQL execution error: {e}")
+                                        results_with_columns = e
+                                    publish_to_mqtt(
+                                        gateway=connector.gateway,
+                                        device_name=device.device_name,
+                                        connector_id=connector.connector_id,
+                                        values=results_with_columns
+                                    )
+
 
                     elif ob_connector.connector_type == "rest":
                         try:
-                            payload = {
+                            rules = Rule.objects.filter(stream=connector)
+                            if not rules.exists() or rules.actions == "inactive":
+                                payload = {
                                 "gateway": connector.gateway.name,
                                 "device": device.device_name,
                                 "connector_id": str(connector.connector_id),
                                 "values": values_dict
                             }
-                            print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+                                print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+                                
+                                if ob_connector.rest_method == "POST":
+                                    resp = requests.post(ob_connector.rest_url, json=payload, timeout=10)
+                                else:  # GET
+                                    resp = requests.get(ob_connector.rest_url, params=payload, timeout=10)
 
-                            if ob_connector.rest_method == "POST":
-                                resp = requests.post(ob_connector.rest_url, json=payload, timeout=10)
-                            else:  # GET
-                                resp = requests.get(ob_connector.rest_url, params=payload, timeout=10)
+                            else:
 
+                                for rule in rules:
+                                    sql = rule.sql
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(sql)
+                                        # fetch results if needed
+                                        rows = cursor.fetchall()
+                                        column_names = [desc[0] for desc in cursor.description]
+
+                                        # build list of dicts with column_name: value mapping
+                                        results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                        print(f"   🌐 Sending REST request to {ob_connector.rest_url} [{ob_connector.rest_method}]")
+
+                                        resp = requests.post(ob_connector.rest_url, json=results_with_columns, timeout=10)
+                                        
+                            
                             print(f"   ✅ REST Response {resp.status_code}: {resp.text}")
+                            ob_connector.status = 'active'
+                            ob_connector.save(update_fields=["status"])
                         except Exception as e:
                             print(f"   ❌ REST API error: {e}")
+                            ob_connector.status = 'inactive'
+                            ob_connector.save(update_fields=["status"])
 
-                   
-        else:
+                    elif ob_connector.connector_type == "openadr-ven":
+                        
+                        ven_client = openadr_clients.get(ob_connector.gateway.id)
+                        if ven_client:
+                            for key, val in values_dict.items():
+                                ven_client.update(device.device_name, key, val)
+
+                        else:
+                            print(f"No VEN client found for connector {ob_connector.gateway.id}")
+                    elif ob_connector.connector_type == "ocpp":
+                        ocpp_client = ocpp_clients.get(ob_connector.gateway.id)
+                        if ocpp_client:
+                            # Prepare the meter data for OCPP format
+                            meter_data = []
+                            timestamp = datetime.utcnow().isoformat() + 'Z'  # UTC ISO format with Zulu time
+                            for key, val in values_dict.items():
+                                mapped = measurand_mapping.get(key.lower(), {'measurand': 'Energy.Active.Import.Register', 'unit': 'Wh'})
+                                meter_data.append({
+                                    'timestamp': timestamp,
+                                    'value': val,
+                                    'unit': mapped['unit'],
+                                    'measurand': mapped['measurand']
+                                })
+                            
+                            
+                            asyncio.run_coroutine_threadsafe(
+                        ocpp_client.send_meter_values(meter_data, device.device_name),
+                        ocpp_client.loop
+                        )
+                    elif ob_connector.connector_type == 'file':
+                        ob_connector.status = 'active'
+                        ob_connector.save(update_fields=["status"])
+                        rules = Rule.objects.filter(stream=connector)
+                        if not rules.exists() or rules.actions == "inactive":
+                            file_path = ob_connector.file_path
+                            print("file_path",file_path)
+                            with open(file_path, 'w', encoding='utf-8') as f:
+                                json.dump(values_dict, f, ensure_ascii=False, indent=2)
+                        else:
+
+                            for rule in rules:
+                                sql = rule.sql
+                                with connection.cursor() as cursor:
+                                    cursor.execute(sql)
+                                    # fetch results if needed
+                                    rows = cursor.fetchall()
+                                    column_names = [desc[0] for desc in cursor.description]
+
+                                    # build list of dicts with column_name: value mapping
+                                    results_with_columns = [dict(zip(column_names, row)) for row in rows]
+                                with open(file_path, 'w', encoding='utf-8') as f:
+                                    json.dump(results_with_columns, f, ensure_ascii=False, indent=2)
+
+     
+        else:   
             print(f"   ❌ Device {device.device_name} connection failed")
             device.device_status = "inactive"
             device.save(update_fields=["device_status"])
@@ -169,6 +279,42 @@ def read_modbus_timeseries(connector):
     else:
         gateway.status = "inactive"
     gateway.save(update_fields=["status"])
+
+
+def insert_timeseries_value(connector_table, device_name,  values_dict,max_points):
+    # Sanitize connector_table & ts_name to valid SQL identifiers, beware SQL injection
+
+    with connection.cursor() as cursor:
+        # Insert new row (simplified)
+        columns = ", ".join(values_dict.keys())
+        placeholders = ", ".join(["%s"] * (len(values_dict) + 1))  # +1 for device_name
+
+        # Include device_id (or device_name) as first column
+        sql = f'INSERT INTO "{connector_table}" (device_id, {columns}) VALUES ({placeholders});'
+
+        # Parameter list: device_name first, then all the values
+        params = [device_name] + list(values_dict.values())
+
+        cursor.execute(sql, params)
+        if max_points:
+            # Delete oldest rows beyond max_points
+            cursor.execute(f'SELECT COUNT(*) FROM "{connector_table}";')
+            row_count = cursor.fetchone()[0]
+
+            # Calculate how many rows to delete
+            excess = row_count - max_points
+            if excess > 0:
+                # Delete the oldest `excess` rows
+                sql_delete = f"""
+                    DELETE FROM "{connector_table}"
+                    WHERE id IN (
+                        SELECT id FROM "{connector_table}"
+                        ORDER BY timestamp ASC
+                        LIMIT ?
+                    );
+                """
+                cursor.execute(sql_delete, [excess])
+
 
 
 def gateway_loop():

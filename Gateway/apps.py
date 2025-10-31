@@ -1,6 +1,9 @@
 from django.apps import AppConfig
 import threading
 import os
+import asyncio
+
+
 
 
 class GatewayConfig(AppConfig):
@@ -9,11 +12,25 @@ class GatewayConfig(AppConfig):
 
     def ready(self):
         if os.environ.get('RUN_MAIN') == 'true':  # Prevent double run in dev mode
+            import Gateway.signals
             # Import here to avoid Django app registry issues
-            from . import modbus, mqtt
+           
+            from .models import IHG_InboundConnector, IHG_OutboundConnector,IHG_Gateway
 
-            # # Start Modbus loop
+            IHG_InboundConnector.objects.all().update(status='inactive')
+            IHG_OutboundConnector.objects.all().update(status='inactive')
+
+            IHG_Gateway.objects.all().update(status='inactive')
+            from . import modbus,mqtt,ocpp_connector,openadr_ven,snmp_connector
+
+            # Start Modbus loop
             modbus.start_modbus_loop()
 
             # # Start MQTT loop
             mqtt.start_mqtt_loop()
+            # Start OpenADR VEN loop
+            openadr_ven.start_openadr_ven_loop()
+            ocpp_connector.start_ocpp_clients()
+            snmp_connector.start_snmp_loop()
+            
+            

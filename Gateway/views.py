@@ -1,14 +1,23 @@
 import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
-from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic
-from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm
+from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector, IHG_Timeseries,Device,IHG_MQTTConfiguration,IHG_ModbusData,IHG_MQTTData,IHG_MQTTTimeseries,IHG_MQTTDevice,IHG_MQTTTopic,RuleChain,Rule,IHG_SNMP_Timeseries
+from .forms import GatewayForm, InboundConnectorForm, OutboundConnectorForm,MQTTConfigurationForm,RuleForm
 import logging
-from Gateway import mqtt,modbus
 from django.db.models import Count, Q, Max
 from django.http import JsonResponse, HttpResponse
-
+from Gateway import modbus, mqtt, openadr_ven, ocpp_connector,snmp_connector
 import csv
+import asyncio
+import os
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+from django.core.serializers.json import DjangoJSONEncoder
+from django.shortcuts import render, get_object_or_404, redirect
+from django.views.decorators.http import require_http_methods
+from django.urls import reverse
+from django.http import HttpResponseForbidden
+from django.db import connection
 logger = logging.getLogger(__name__)
 
 def gateway_list(request):
@@ -108,6 +117,12 @@ def get_mqtt_data_nested(mqtt_config):
         }
     return topics_dict
 
+def column_exists(table_name, column_name):
+    with connection.cursor() as cursor:
+        cursor.execute(f"PRAGMA table_info({table_name});")
+        columns = [row[1] for row in cursor.fetchall()]  # column names are in second column
+    return column_name in columns
+
 def edit_inbound_connector(request, connector_pk):
     connector = get_object_or_404(IHG_InboundConnector, pk=connector_pk)
     mqtt_config = None
@@ -125,6 +140,7 @@ def edit_inbound_connector(request, connector_pk):
 
         if form.is_valid():
             connector = form.save()
+            gateway_id = connector.gateway.id
 
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
@@ -188,6 +204,11 @@ def edit_inbound_connector(request, connector_pk):
                                         key=ts_key,
                                         type=ts_type if ts_type else 'String',
                                     )
+                                    with connection.cursor() as cursor:
+                                        print("name",ts_key.strip())
+                                        if not column_exists(connector.name, ts_key.strip()):
+                                            cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{ts_key.strip()}" FLOAT;')
+
                 mqtt.stop_mqtt_loop()
                 mqtt.start_mqtt_loop()
             elif connector.connector_type == "modbus":
@@ -230,15 +251,97 @@ def edit_inbound_connector(request, connector_pk):
                                 byte_order=ts_byte_orders[t].strip(),
                                 data_type=ts_data_types[t].strip()
                             )
+                            with connection.cursor() as cursor:
+                                print("name",ts_names[t].strip())
+                                if not column_exists(connector.name, ts_names[t].strip()):
+                                    cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{ts_names[t].strip()}" FLOAT;')
+
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
+            elif connector.connector_type == 'snmp':
+                community = request.POST.get('community', 'public')
+                
+                connector.configuration= community
+                
+                connector.save(update_fields=['configuration'])
+                connector.devices.all().delete()
+                device_keys = [key for key in request.POST.keys() if key.startswith('devices-') and key.endswith('-name')]
+                device_indices = sorted(set(key.split('-')[1] for key in device_keys))
+
+                for di in device_indices:
+                    name = request.POST.get(f'devices-{di}-name', '').strip()
+                    ip = request.POST.get(f'devices-{di}-ip', '').strip()
+                    port = request.POST.get(f'devices-{di}-port', '').strip()
+                    if not (name and ip and port):
+                        continue
+
+                    device = Device.objects.create(
+                        connector=connector,
+                        device_name=name,
+                        device_ip=ip,
+                        device_port=int(port)
+                    )
+
+                    # Handle OIDs of the device
+                    oid_keys = [key for key in request.POST.keys()
+                                if key.startswith(f'devices-{di}-oids-') and key.endswith('-key')]
+                    oid_indices = sorted(set(key.split('-')[3] for key in oid_keys))
+
+                    for oi in oid_indices:
+                        key_val = request.POST.get(f'devices-{di}-oids-{oi}-key', '').strip()
+                        type_val = request.POST.get(f'devices-{di}-oids-{oi}-type', '').strip()
+                        oid_val = request.POST.get(f'devices-{di}-oids-{oi}-oid', '').strip()
+                        method_val = request.POST.get(f'devices-{di}-oids-{oi}-method', '').strip()
+
+                        if not key_val:
+                            continue
+
+                        IHG_SNMP_Timeseries.objects.create(
+                            device=device,
+                            name=key_val,
+                            datatype=type_val or 'STRING',
+                            address=oid_val,
+                            method=method_val or 'GET'
+                        )
+                        with connection.cursor() as cursor:
+                                print("name",key_val)
+                                snmp_type_to_sql = {
+                                'STRING': 'VARCHAR(255)',
+                                'INTEGER': 'INTEGER',
+                                'COUNTER': 'BIGINT',
+                                'GAUGE': 'BIGINT',
+                                'TIMETICKS': 'BIGINT',
+                                'OID': 'VARCHAR(255)',
+                                'FLOAT': 'DOUBLE PRECISION',
+                                'TABLE': 'TEXT '
+                            }
+
+                     
+                                sql_type = snmp_type_to_sql.get(type_val.upper(), 'VARCHAR(255)')
+                                if not column_exists(connector.name,key_val):
+                                    cursor.execute(f'ALTER TABLE {connector.name} ADD COLUMN "{key_val}" {sql_type};')
+                snmp_connector.stop_snmp_loop()
+                snmp_connector.start_snmp_loop()
+                
+            try:
+                out_connector = IHG_OutboundConnector.objects.get(gateway=gateway_id)
+                # Assuming 'connector' is your inbound connector instance whose interval you want to copy
+                out_connector.interval = connector.interval
+                out_connector.save(update_fields=["interval"])
+                if out_connector.connector_type == 'openadr-ven':
+                    openadr_ven.start_openadr_ven_loop()
+            except IHG_OutboundConnector.DoesNotExist:
+                print(f"No outbound connector found for gateway {gateway_id}")
+
             messages.success(request, "Inbound connector updated successfully.")
             return redirect('edit_inbound_connector', connector_pk=connector_pk)
 
     else:
         form = InboundConnectorForm(instance=connector)
-
-    devices = Device.objects.filter(connector=connector).prefetch_related('timeseries')
+    if connector.connector_type == "snmp":
+        devices = Device.objects.filter(connector=connector).prefetch_related('snmp_timeseries')
+    else:
+        devices = Device.objects.filter(connector=connector).prefetch_related('timeseries')
     return render(request, 'inbound_connector.html', {
         'connector': connector,
         'devices': devices,
@@ -286,6 +389,7 @@ def edit_outbound_connector(request, connector_pk):
             connector = form.save()
             gateway_id = connector.gateway.id
             in_connector = IHG_InboundConnector.objects.get(gateway=gateway_id)
+            connector.interval = in_connector.interval
             if connector.connector_type == "mqtt":
                 mqtt_form = MQTTConfigurationForm(request.POST, instance=mqtt_config)
                 if mqtt_form.is_valid():
@@ -305,19 +409,61 @@ def edit_outbound_connector(request, connector_pk):
             elif connector.connector_type == "rest":
                 
                 connector.rest_url = post_data.get("rest_url")
-                connector.rest_method = post_data.get("rest_method", "POST")
-                connector.save(update_fields=["rest_url", "rest_method"])
+                print("1111111111111",post_data.get("rest_method"))
+                connector.rest_method = post_data.get("rest_method")
+                connector.save(update_fields=["rest_url","rest_method"])
             elif connector.connector_type == 'openadr-ven':
+                if 'remove_certificate' in request.POST:
+                    if connector.certificate:
+                        connector.certificate.delete(save=False)  # Deletes the file from storage
+                        connector.certificate = None
+        
+                if 'remove_private_key' in request.POST:
+                    if connector.private_key:
+                        connector.private_key.delete(save=False)
+                        connector.private_key = None
+
+                connector.interval = in_connector.interval
                 connector.rest_url = post_data.get("rest_url")
+                cert_file = request.FILES.get("certificate")
+                key_file = request.FILES.get("private_key")
+                print(f"Type of connector.certificate: {type(connector.certificate)}")
+                print(f"Type of connector.private_key: {type(connector.private_key)}")
                 
-                connector.save(update_fields=["rest_url"])
+                if cert_file:
+                    folder_path = os.path.join(settings.BASE_DIR,'Gateway', 'static', 'openadr', str(connector.id))
+                    os.makedirs(folder_path, exist_ok=True)
+                    certificate_path = os.path.join('openadr', str(connector.id), cert_file.name)
+                    connector.certificate.save(certificate_path, cert_file, save=False)
+
+
+                if key_file:
+                    folder_path = os.path.join(settings.BASE_DIR,'Gateway', 'static', 'openadr', str(connector.id))
+                    os.makedirs(folder_path, exist_ok=True)
+                    private_key_path = os.path.join('openadr', str(connector.id), key_file.name)
+                    connector.private_key.save(private_key_path, key_file, save=False)
+
+                
+
+                connector.save(update_fields=["rest_url", "interval", "certificate", "private_key"])
+                openadr_ven.start_openadr_ven_loop()
+            elif connector.connector_type == 'ocpp':
+                connector.rest_url = request.POST.get("rest_url", "").strip()
+                connector.charge_point_id = request.POST.get("charge_point_id", "").strip()
+                connector.save()
+                ocpp_connector.stop_ocpp_clients()
+                ocpp_connector.start_ocpp_clients()
+            elif connector.connector_type == 'file':
+                connector.file_path = request.POST.get("file_path", "").strip()
+                connector.status = 'active'
+                connector.save()
             if in_connector.connector_type == "modbus":
                 modbus.stop_modbus_loop()
                 modbus.start_modbus_loop()
             elif in_connector.connector_type == 'mqtt':
                 mqtt.stop_mqtt_loop()
                 mqtt.start_mqtt_loop()
-
+                    
 
                 
             print('Outbound connector updated.')
@@ -397,132 +543,6 @@ def add_timeseries(request, connector_pk):
         messages.success(request, 'Timeseries added successfully.')
     return redirect('gateway_app:edit_inbounf_connector', connector_pk=connector_pk)
 
-
-
-# def import_gateway_config(request, gateway_id):
-#     gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
-
-#     try:
-#         file_data = request.FILES['config_file'].read().decode('utf-8')
-#         config_json = json.loads(file_data)
-#         IHG_InboundConnector.objects.filter(gateway=gateway, connector_type='modbus', is_inbound=True).delete()
-#         IHG_OutboundConnector.objects.filter(gateway=gateway, connector_type='mqtt').delete()
-
-#         # --- Handle Modbus Inputs (Inbound Connectors) ---
-#         modbus_inputs = config_json.get('inputs', {}).get('modbus', [])
-#         for mb in modbus_inputs:
-#             inbound, created = IHG_InboundConnector.objects.get_or_create(
-#                 gateway=gateway,
-#                 name=mb.get('name'),
-#                 defaults={
-#                     'connector_type': 'modbus',
-#                     'is_inbound': True,
-#                     'configuration': mb
-#                 }
-#             )
-#             # Update configuration if already exists
-#             if not created:
-#                 inbound.configuration = mb
-#                 inbound.save()
-
-#             # Create Device(s) from tags if available
-#             tags = mb.get('tags', {})
-#             controller = mb.get('controller', [])
-#             print("controller",controller)
-#             if controller and controller.startswith('tcp://'):
-#                 # extract IP and port
-#                 ip_port = controller[6:]  # after tcp://
-#                 print("ip_port",ip_port)
-#                 if ':' in ip_port:
-#                     ip, port_str = ip_port.split(':', 1)
-#                     port = int(port_str)
-#                 else:
-#                     ip = ip_port
-#                     port = 0000
-#             else:
-#                 ip = '127.0.0.1'
-#                 port = 0000
-#             device_id = tags.get('device_id')
-#             device_name = tags.get('device_name')
-
-#             if device_id and device_name:
-#                 device, _ = Device.objects.get_or_create(
-#                     connector=inbound,
-#                     device_id=device_id,
-#                     device_ip=ip,
-#                     device_port=port,
-#                     defaults={'device_name': device_name}
-#                 )
-#             else:
-#                 device = None  # No device info provided, skip timeseries
-
-#             # Save holding registers as Timeseries linked to Device
-#             if device:
-#                 for reg in mb.get('holding_registers', []):
-#                     IHG_Timeseries.objects.update_or_create(
-#                         device=device,
-#                         name=reg.get('name'),
-#                         defaults={
-#                             'scale': float(reg.get('scale', 1.0)),
-#                             'address': ",".join(map(str, reg.get('address', []))),
-#                             'byte_order': reg.get('byte_order'),
-#                             'data_type': reg.get('data_type'),
-#                         }
-#                     )
-
-#         # --- Handle MQTT Outputs (Outbound Connectors) ---
-#         mqtt_outputs = config_json.get('outputs', {}).get('mqtt', [])
-#         for mqtt in mqtt_outputs:
-#             # Use a unique name for outbound connector (e.g. client_id or topic)
-#             name = f"Mqtt{mqtt.get('qos')}"
-
-
-#             outbound, created = IHG_OutboundConnector.objects.get_or_create(
-#                 gateway=gateway,
-#                 name=name,
-#                 defaults={
-#                     'connector_type': 'mqtt',
-#                     'is_inbound': False,
-#                     'configuration': mqtt
-#                 }
-#             )
-#             # Update configuration if exists
-#             if not created:
-#                 outbound.configuration = mqtt
-#                 outbound.save()
-
-#             # Update or create MQTT configuration
-#             server_url = mqtt.get('servers', [None])[0]
-#             if server_url and server_url.startswith('tcp://'):
-#                 ip_port = server_url[6:]
-#                 if ':' in ip_port:
-#                     ip, port_str = ip_port.split(':', 1)
-#                     port = int(port_str)
-#                 else:
-#                     ip = ip_port
-#                     port = 1883
-#             else:
-#                 ip = '127.0.0.1'
-#                 port = 1883
-
-#             IHG_MQTTConfiguration.objects.update_or_create(
-#                 connector=outbound,
-#                 defaults={
-#                     'broker_ip': ip,
-#                     'port': port,
-#                     'interval': '60s',  # default, adjust if config has it
-#                     'username': mqtt.get('username'),
-#                     'password': mqtt.get('password'),
-#                     'topic': mqtt.get('topic', ''),
-#                 }
-#             )
-
-#         messages.success(request, "Configuration imported successfully.")
-
-#     except Exception as e:
-#         messages.error(request, f"Error importing configuration: {e}")
-
-#     return redirect('gateway_detail', pk=gateway_id)
 
 def import_gateway_config(request, gateway_id):
     gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
@@ -701,29 +721,38 @@ def api_connectors(request, gateway_id):
 # 3. Get all Devices for a Connector
 def api_devices(request, gateway_id):
     connectors = IHG_InboundConnector.objects.filter(gateway_id=gateway_id)
+    
     if connectors.filter(connector_type="modbus").exists():
+        
         devices = list(
             Device.objects.filter(connector__gateway_id=gateway_id)
             .values("id", "device_name", "device_status")
         )
-        print(devices,devices)
+        print("device_names..",devices)
         return JsonResponse({"devices": devices})
 
     # Otherwise, if any connector is mqtt
     elif connectors.filter(connector_type="mqtt").exists():
+        print(11111111111111111111)
         # Get MQTT configs linked to inbound connectors of this gateway
         mqtt_configs = IHG_MQTTConfiguration.objects.filter(connector_inbound__gateway_id=gateway_id)
-        # Find distinct device names in the mqtt data tied to these configs
+        print("mqtt_configs__",mqtt_configs)
         device_names = (
-            IHG_MQTTData.objects
-            .filter(config__in=mqtt_configs)
-            .values_list("id","device_name", flat=True)
+            IHG_MQTTDevice.objects
+            .filter(topic__mqtt_config__in=mqtt_configs)
+            .values("id","device_name")
             .distinct()
         )
-        print("device_names",list(device_names))
+        print("device_names...",list(device_names))
         return JsonResponse({"devices": list(device_names)})
-
-    return JsonResponse({"devices": devices})
+    
+    elif connectors.filter(connector_type="snmp").exists():
+        devices = list(
+            Device.objects.filter(connector__gateway_id=gateway_id)
+            .values("id", "device_name")
+        )
+        print("device_names..",devices)
+        return JsonResponse({"devices": devices})
 
 
 # 4. Get latest Modbus data for a Device
@@ -740,81 +769,75 @@ def api_latest_data(request, device_id):
     )
     return JsonResponse({"data": list(latest_data)})
 
-from django.db.models import OuterRef, Subquery
-from django.db.models.functions import Coalesce
 
 from django.db.models import OuterRef, Subquery, Q
 
-def get_devices_data_for_gateway(gateway_id,device_id=None):
-    # Get all devices for gateway
-    print("devices",gateway_id,device_id)
+from django.db.models import OuterRef, Subquery, Max
+
+def get_devices_data_for_gateway(gateway_id, device_id=None):
+    print("devices", gateway_id, device_id)
+
+    connector = IHG_InboundConnector.objects.get(gateway_id=gateway_id)
+    table_name = connector.name.lower().replace("-", "_")
     if device_id:
-        devices=Device.objects.filter(connector__gateway_id=gateway_id,id=device_id)
+        sql = f"""
+        SELECT t.*
+        FROM "{table_name}" t
+        INNER JOIN (
+            SELECT device_id, MAX(timestamp) AS max_ts
+            FROM "{table_name}" where device_id = '{device_id}'
+            GROUP BY device_id
+        ) latest
+        ON t.device_id = latest.device_id AND t.timestamp = latest.max_ts
+        ORDER BY t.device_id;
+    """
     else:
-        devices = Device.objects.filter(connector__gateway_id=gateway_id)
-    print("devices",devices)
+        sql = f"""
+        SELECT t.*
+        FROM "{table_name}" t
+        INNER JOIN (
+            SELECT device_id, MAX(timestamp) AS max_ts
+            FROM "{table_name}" 
+            GROUP BY device_id
+        ) latest
+        ON t.device_id = latest.device_id AND t.timestamp = latest.max_ts
+        ORDER BY t.device_id;
+    """
 
+    print("sql__",sql)
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
 
-    # Annotate each device with its last communication time (max timestamp from modbus data)
-    last_comm_qs = IHG_ModbusData.objects.filter(
-        timeseries__device=OuterRef('pk'),
-        value__isnull=False
-    ).order_by().values('timeseries__device').annotate(
-        last_comm=Max('timestamp')
-    ).values('last_comm')
+    if rows:
+        result = [dict(zip(columns, row)) for row in rows]
+        print("result___",result)
+            # Get latest mqtt data for device
+            
+        return result
 
-    devices = devices.annotate(
-        last_communication=Subquery(last_comm_qs[:1])
-    )
-
-    # Latest non-null modbus data per timeseries
-    latest_modbus = IHG_ModbusData.objects.filter(
-        timeseries=OuterRef('pk'),
-        value__isnull=False
-    ).order_by('-timestamp')
-
-    # Annotate each timeseries with latest value and timestamp
-    timeseries_with_latest = IHG_Timeseries.objects.filter(
-        device__in=devices
-    ).annotate(
-        latest_value=Subquery(latest_modbus.values('value')[:1]),
-        latest_timestamp=Subquery(latest_modbus.values('timestamp')[:1])
-    ).filter(
-        latest_value__isnull=False
-    ).select_related('device')
-
-    # Build flat list for frontend
-    result = []
-
-    # Build a dict of device last communication times for quick lookup
-    device_last_comm = {d.device_name: d.last_communication for d in devices}
-
-    for ts in timeseries_with_latest:
-        last_comm = device_last_comm.get(ts.device.device_name)
-        result.append({
-            "device_name": ts.device.device_name,
-            "key": ts.name,
-            "value": ts.latest_value,
-            "last_update_time": ts.latest_timestamp.isoformat() if ts.latest_timestamp else None,
-            "device_last_communication": last_comm.isoformat() if last_comm else None,  # Include device last comm time
-        })
-
-    return result
+    else:
+        # Connector type not modbus or mqtt; return empty
+        return []
 
 
 def monitor_filters(request):
     gateways = list(IHG_Gateway.objects.values("id", "name"))
-    devices = list(Device.objects.values("id", "device_name"))
+    inboundconnectors = list(IHG_InboundConnector.objects.values("id", "name"))
+    outboundconnectors = list(IHG_OutboundConnector.objects.values("id", "name"))
 
-    active_devices_count = Device.objects.filter(device_status="active").count()
+    active_inboundconnectors_count = IHG_InboundConnector.objects.filter(status="active").count()
+    active_outboundconnector_count = IHG_OutboundConnector.objects.filter(status="active").count()
 
     return JsonResponse({
-        "gateways": gateways,
-        "devices": devices,
+        "gateways":gateways,
         "meta": {
             "gateways": len(gateways),
-            "devices": len(devices),
-            "active_devices": active_devices_count
+            "connectors": len(inboundconnectors) + len(outboundconnectors),
+            "outboundconnectors": len(outboundconnectors),
+            "active_connectors_count": (active_inboundconnectors_count+active_outboundconnector_count),
+            
         }
     })
 
@@ -838,7 +861,7 @@ def monitor_data(request):
 def monitor_csv(request):
     gateway_id = request.GET.get("gateway")
     device_id = request.GET.get("device", "").strip()
-    limit = int(request.GET.get("limit", "50"))
+    
 
     if not gateway_id:
         return HttpResponse("Missing gateway parameter", status=400)
@@ -850,7 +873,8 @@ def monitor_csv(request):
 
     # Get devices under this gateway
     devices_qs = Device.objects.filter(connector__gateway=gateway)
-
+    ds=devices_qs.connector.connector_type
+    print("devices_qs",ds)
     if device_id:
         devices_qs = devices_qs.filter(id=device_id)
 
@@ -864,7 +888,7 @@ def monitor_csv(request):
     for device in devices_qs:
         timeseries_qs = device.timeseries.all()
         for ts in timeseries_qs:
-            modbus_data = ts.modbus_data.all()[:limit]  # latest N values
+            modbus_data = ts.modbus_data.all()  # latest N values
             for row in modbus_data:
                 writer.writerow([
                     gateway.name,
@@ -875,3 +899,140 @@ def monitor_csv(request):
                 ])
 
     return response
+
+def rulechain_view(request, gateway_id):
+    gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+    rulechain, _ = RuleChain.objects.get_or_create(gateway=gateway)
+
+    # Check if a saved rulechain is present and has nodes/edges data
+    has_saved_flow = bool(rulechain.nodes and rulechain.edges)
+
+    if has_saved_flow:
+        nodes = json.loads(rulechain.nodes)
+        edges = json.loads(rulechain.edges)
+    else:
+        nodes = []
+        inbound_connectors = gateway.inbound_connectors.all()
+        outbound_connectors = gateway.outbound_connectors.all()
+        x_inbound = 120
+        y_start = 100
+        y_gap = 70
+        for i, c in enumerate(inbound_connectors):
+            nodes.append({
+                "id": c.id,
+                "type": c.connector_type,
+                "x": x_inbound,
+                "y": y_start + i * y_gap,
+                "label": c.connector_type
+            })
+        x_outbound = 350
+        for j, c in enumerate(outbound_connectors):
+            nodes.append({
+                "id": c.id,
+                "type": c.connector_type,
+                "x": x_outbound,
+                "y": y_start + j * y_gap,
+                "label": c.connector_type
+            })
+        edges = []
+        for in_c in inbound_connectors:
+            for out_c in outbound_connectors:
+                edges.append({
+                    "from": in_c.id,
+                    "to": out_c.id
+                })
+
+    nodes_json = json.dumps(nodes, cls=DjangoJSONEncoder)
+    edges_json = json.dumps(edges, cls=DjangoJSONEncoder)
+
+    return render(request, 'rulechain_flow.html', {
+        'gateway': gateway,
+        'rulechain': rulechain,
+        'nodes_json': nodes_json,
+        'edges_json': edges_json,
+        'has_saved_flow': has_saved_flow
+    })
+
+@csrf_exempt  # or use csrf token management in AJAX headers
+def save_rulechain(request, gateway_id):
+    if request.method == 'POST':
+        gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+        try:
+            data = json.loads(request.body)
+            nodes = data.get('nodes', [])
+            edges = data.get('edges', [])
+
+            # Save nodes and edges to your models here:
+            # Example (you need to define your own save logic/model updates):
+            rulechain, _ = RuleChain.objects.get_or_create(gateway=gateway)
+            rulechain.nodes = json.dumps(nodes)   # store as JSON string or model relations
+            rulechain.edges = json.dumps(edges)
+            rulechain.save()
+
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid method'})
+
+
+def rule_list(request,gateway_id):
+    
+    gateway = get_object_or_404(IHG_Gateway, id=gateway_id)
+    inboundconnectors = IHG_InboundConnector.objects.filter(gateway=gateway)
+    rules = Rule.objects.filter(stream__gateway=gateway)
+    return render(request, 'rules/list.html', {'rules': rules, 'gateway': gateway,'inboundconnectors':inboundconnectors})
+
+def rule_create(request, gateway_id):
+    if request.method == 'POST':
+        form = RuleForm(request.POST, gateway_id=gateway_id)
+        if form.is_valid():
+            rule = form.save()
+            # get gateway for redirect based on selected stream
+            gateway_id = rule.stream.gateway.id
+            return redirect('rule_list', gateway_id=gateway_id)
+    else:
+        form = RuleForm(gateway_id=gateway_id)
+
+    return render(request, 'rules/form.html', {'form': form})
+
+@require_http_methods(["GET", "POST"])
+def rule_edit(request, pk):
+    rule = get_object_or_404(Rule, pk=pk)
+    gateway_id = rule.stream.gateway.id if rule.stream and rule.stream.gateway else None
+
+    if request.method == "POST":
+        form = RuleForm(request.POST, instance=rule, gateway_id=gateway_id)
+        if form.is_valid():
+            form.save()
+            return redirect('rule_list', gateway_id=gateway_id)
+    else:
+        form = RuleForm(instance=rule, gateway_id=gateway_id)
+
+    return render(request, "rules/rule_edit.html", {"form": form, "rule": rule, "gateway_id": gateway_id})
+
+@require_http_methods(["POST"])
+def rule_delete(request, pk):
+    rule = get_object_or_404(Rule, pk=pk)
+    # You can add permission checks here
+    if request.method == "POST":
+        rule.delete()
+        return redirect(reverse('rule_list'))
+    else:
+        return HttpResponseForbidden("Invalid request method.")
+
+def toggle_rule_active(request, pk):
+    rule_to_toggle = get_object_or_404(Rule, pk=pk)
+    # current_active = rule_to_toggle.actions.get('active', False) if rule_to_toggle.actions else False
+
+    if rule_to_toggle.actions == 'inactive':
+        actions = 'active'
+        
+    else:
+            
+        actions = 'inactive'
+        
+    rule_to_toggle.actions = actions
+    rule_to_toggle.save(update_fields=['actions'])
+    
+    return JsonResponse({'status': 'success', 'active_rule_id': rule_to_toggle.id})
+

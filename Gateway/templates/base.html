@@ -153,6 +153,9 @@
             <a class="nav-link {% if request.resolver_match.url_name == 'gateway_list' %}active{% endif %}" href="{% url 'gateway_list' %}">
                 <i class="bi bi-hdd-network"></i> Gateways
             </a>
+           
+           
+          
             <a class="nav-link {% if request.resolver_match.url_name == 'monitor' %}active{% endif %}" href="{% url 'monitor' %}">
                 <i class="bi bi-speedometer2"></i> Monitor
             </a>

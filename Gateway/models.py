@@ -49,7 +49,7 @@ class IHG_InboundConnector(IHG_ConnectorBase):
     INBOUND_TYPE_CHOICES = (
         ('modbus', 'Modbus'),
         ('mqtt', 'MQTT'),
-        ('rest', 'REST'),
+        ('snmp', 'SNMP'),
         ('custom', 'Custom')
     )
 
@@ -72,7 +72,9 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
     OUTBOUND_TYPE_CHOICES = (
         ('mqtt', 'MQTT'),
         ("rest", "REST"),   
-        # ("openadr-ven", "OpenADR-VEN"),   
+        ("openadr-ven", "OpenADR-VEN"), 
+        ("ocpp", "OCPP"),  
+        ("file", "File"),  
         ('custom', 'Custom'),
     )
 
@@ -91,7 +93,32 @@ class IHG_OutboundConnector(IHG_ConnectorBase):
         choices=[("GET", "GET"), ("POST", "POST")],
         default="POST"
     )
-
+    certificate = models.FileField(
+    upload_to='Gateway/static/',
+    blank=True,
+    null=True,
+    default=None,
+    verbose_name="Certificate File"
+    )
+    private_key = models.FileField(
+        upload_to='Gateway/static/',
+        blank=True,
+        null=True,
+        default=None,
+        verbose_name="Private Key File"
+    )
+    charge_point_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        verbose_name="OCPP Charge Point ID"
+    )
+    file_path = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        verbose_name="File Path"
+    )
     class Meta:
         verbose_name = "Outbound Connector"
         verbose_name_plural = "Outbound Connectors"
@@ -138,6 +165,13 @@ class IHG_Timeseries(models.Model):
             ('DOUBLE', 'DOUBLE'),
         ]
     )
+    
+class IHG_SNMP_Timeseries(models.Model):
+    device = models.ForeignKey(Device, related_name='snmp_timeseries', on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    datatype = models.CharField(max_length=50,default='')
+    address = models.CharField(max_length=100,default=0)  # SNMP OID
+    method = models.CharField(max_length=10, default='GET')
 
 class IHG_MQTTConfiguration(models.Model):
     connector_inbound = models.OneToOneField(
@@ -246,3 +280,19 @@ class IHG_MQTTData(models.Model):
             if count > max_points:
                 ids_to_delete = qs[max_points:].values_list("id", flat=True)
                 IHG_MQTTData.objects.filter(id__in=ids_to_delete).delete()
+
+
+class Rule(models.Model):
+    name = models.CharField(max_length=100)
+    stream = models.ForeignKey(IHG_InboundConnector, on_delete=models.CASCADE)
+    sql = models.TextField()
+    options = models.JSONField(blank=True, null=True)
+    actions = models.JSONField(blank=True, null=True,default='inactive')
+
+class RuleChain(models.Model):
+    gateway = models.OneToOneField(IHG_Gateway, on_delete=models.CASCADE)
+    nodes = models.TextField(blank=True, null=True)  # JSON serialized nodes
+    edges = models.TextField(blank=True, null=True)  # JSON serialized edges
+
+    def __str__(self):
+        return f"RuleChain for {self.gateway}"

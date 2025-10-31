@@ -142,12 +142,66 @@
                     <option value="GET" {% if connector.rest_method == 'GET' %}selected{% endif %}>GET</option>
                 </select>
             </div>
+            {% elif connector.connector_type == "file" %}
+            <div class="mb-3">
+                <label class="form-label" for="filePathInput">File Path</label>
+                <input
+                type="text"
+                id="filePathInput"
+                name="file_path"
+                class="form-control"
+                value="{{ connector.file_path|default_if_none:'' }}"
+                required
+                placeholder="Enter file path"
+                pattern=".*\.json$"
+                title="File path must end with .json"
+                >
+            </div>
+
+
+
             {% elif connector.connector_type == "openadr-ven" %}
              <div class="mb-3">
         <label class="form-label" for="vtnUrlInput">VTN URL</label>
         <input type="url" id="vtnUrlInput" name="rest_url" class="form-control" value="{{ connector.rest_url|default_if_none:'' }}" required>
     </div>
+    <div class="mb-3">
+        <label class="form-label" for="certificateInput">Certificate File</label>
+        <input type="file" id="certificateInput" name="certificate" class="form-control">
 
+        {% if connector.certificate %}
+            <small>Current file: {{ connector.certificate.name }}</small><br>
+            <input type="checkbox" id="remove_certificate" name="remove_certificate">
+            <label for="remove_certificate">Remove current certificate file</label>
+        {% endif %}
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label" for="privateKeyInput">Private Key File</label>
+        <input type="file" id="privateKeyInput" name="private_key" class="form-control">
+
+        {% if connector.private_key %}
+            <small>Current file: {{ connector.private_key.name }}</small><br>
+            <input type="checkbox" id="remove_private_key" name="remove_private_key">
+            <label for="remove_private_key">Remove current private key file</label>
+        {% endif %}
+    </div>
+        {% elif connector.connector_type == "ocpp" %}
+    <div class="mb-3">
+        <label class="form-label" for="wsUrlInput">WebSocket URL</label>
+        <input type="url" id="wsUrlInput" name="rest_url" class="form-control"
+               value="{{ connector.rest_url|default_if_none:'' }}" required>
+        <small class="form-text text-muted">Enter the OCPP WebSocket server URL, e.g. ws://ip:port/ocpp</small>
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label" for="chargePointIdInput">Charge Point ID</label>
+        <input type="text" id="chargePointIdInput" name="charge_point_id" class="form-control"
+               value="{{ connector.charge_point_id|default_if_none:'' }}" required>
+        <small class="form-text text-muted">Unique identifier for this OCPP charge point</small>
+    </div>
+
+    
             {% endif %}
 
             <button type="submit" class="btn btn-primary w-100">Save Configuration</button>

@@ -1,5 +1,5 @@
 from django import forms
-from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector,IHG_MQTTConfiguration
+from .models import IHG_Gateway, IHG_InboundConnector, IHG_OutboundConnector,IHG_MQTTConfiguration,Rule
 
 class GatewayForm(forms.ModelForm):
     class Meta:
@@ -42,3 +42,22 @@ class MQTTConfigurationForm(forms.ModelForm):
         if not data:
             return []
         return [t.strip() for t in data.replace('\n', ',').split(',') if t.strip()]
+
+
+from django import forms
+from .models import Rule, IHG_InboundConnector
+class RuleForm(forms.ModelForm):
+    class Meta:
+        model = Rule
+        fields = ['name', 'stream', 'sql']
+        widgets = {
+            'sql': forms.Textarea(attrs={'rows': 6, 'cols': 80}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        gateway_id = kwargs.pop('gateway_id', None)
+        super().__init__(*args, **kwargs)
+        if gateway_id:
+            self.fields['stream'].queryset = IHG_InboundConnector.objects.filter(gateway_id=gateway_id)
+        else:
+            self.fields['stream'].queryset = IHG_InboundConnector.objects.none()

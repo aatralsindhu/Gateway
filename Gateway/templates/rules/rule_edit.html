@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+
+{% block content %}
+
+<style>
+  .edit-rule-container {
+    max-width: 700px;
+    margin: 30px auto;
+    background: #ffffff;
+    padding: 30px 38px;
+    border-radius: 10px;
+    box-shadow: 0 2px 17px rgba(0, 0, 0, 0.09);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  .edit-rule-container h2 {
+    color: #30475e;
+    font-weight: 700;
+    margin-bottom: 25px;
+    text-align: center;
+  }
+  label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #364c64;
+  }
+  input[type="text"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 11px 14px;
+    border-radius: 6px;
+    border: 1px solid #d2d6dc;
+    font-size: 1rem;
+    box-sizing: border-box;
+    margin-bottom: 20px;
+    transition: border-color 0.3s ease;
+  }
+  input[type="text"]:focus,
+  select:focus,
+  textarea:focus {
+    border-color: #238aff;
+    outline: none;
+  }
+  .form-actions {
+    text-align: center;
+  }
+  button.save-btn {
+    background-color: #007bff;
+    border: none;
+    color: white;
+    padding: 14px 28px;
+    font-size: 1rem;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  button.save-btn:hover {
+    background-color: #0056b3;
+  }
+  a.cancel-link {
+    display: inline-block;
+    margin-left: 20px;
+    color: #666;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 1rem;
+  }
+  a.cancel-link:hover {
+    text-decoration: underline;
+  }
+</style>
+
+<div class="edit-rule-container">
+  <h2>Edit Rule: {{ rule.name }}</h2>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <div class="form-actions">
+      <button type="submit" class="save-btn">Save Changes</button>
+     
+<a href="{% url 'rule_list' gateway_id %}" class="cancel-link">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

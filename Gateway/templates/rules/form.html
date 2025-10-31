@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+.create-rule-container {
+  max-width: 700px;
+  margin: 32px auto;
+  background: #fff;
+  padding: 30px 38px 38px 38px;
+  border-radius: 10px;
+  box-shadow: 0 2px 17px rgba(0,0,0,0.09);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.create-rule-container h2 {
+  text-align: center;
+  color: #30475e;
+  font-weight: 700;
+  margin-bottom: 28px;
+}
+.form-section {
+  margin-bottom: 20px;
+}
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  background: #f7f9fc;
+  border: none;
+  padding: 10px 0;
+  font-weight: 600;
+  color: #007bff;
+  font-size: 1.03rem;
+  transition: background 0.18s;
+}
+.advanced-toggle .chevron {
+  margin-left: 15px;
+  transition: transform 0.2s;
+}
+.advanced {
+  display: none;
+  margin-top: 16px;
+  animation: slideDown 0.3s ease-out;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0);}
+}
+input, select, textarea {
+  width: 100%;
+  padding: 10px 13px;
+  margin-top: 8px;
+  margin-bottom: 13px;
+  border-radius: 4px;
+  border: 1px solid #d2d6dc;
+  font-size: 1rem;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: #238aff;
+  outline: none;
+}
+.form-label {
+  font-weight: 600;
+  margin-bottom: 7px;
+  display: block;
+  color: #364c64;
+}
+/* Button style */
+.save-btn {
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 15px 0;
+  width: 100%;
+  font-size: 1rem;
+  border-radius: 8px;
+  margin-top: 20px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.save-btn:hover {
+  background-color: #0056b3;
+}
+</style>
+
+<script>
+function toggleAdvanced() {
+  const advancedDiv = document.getElementById('advanced-options');
+  const chevron = document.getElementById('chevron-icon');
+  if (advancedDiv.style.display === 'block') {
+    advancedDiv.style.display = 'none';
+    chevron.style.transform = 'rotate(0deg)';
+  } else {
+    advancedDiv.style.display = 'block';
+    chevron.style.transform = 'rotate(180deg)';
+  }
+}
+</script>
+
+<div class="create-rule-container">
+  <h2>Create Rule</h2>
+  <form method="post">
+    {% csrf_token %}
+      
+   
+    {{ form.as_p }}
+    <!-- Advanced Options Toggle
+    <button type="button" class="advanced-toggle" onclick="toggleAdvanced()">
+      Show Advanced <span id="chevron-icon" class="chevron">&#9660;</span>
+    </button>
+    
+    
+    <div id="advanced-options" class="advanced">
+     
+      
+      <div class="form-section">
+        <label class="form-label">Late Tolerance (ms)</label>
+        <input type="text" name="late_tolerance" value="0">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Buffer Length</label>
+        <input type="text" name="buffer_length" value="1024">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Concurrency</label>
+        <input type="text" name="concurrency" value="1">
+      </div>
+      <div class="form-section">
+        <label class="form-label">QoS</label>
+        <select name="qos">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+        </select>
+      </div>
+      
+      <div class="form-section">
+        <label class="form-label">Check Point Interval (ms)</label>
+        <input type="text" name="check_point_interval" value="300000">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Delay</label>
+        <input type="text" name="delay" value="1000">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Multiplier</label>
+        <input type="text" name="multiplier" value="2">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Max Delay</label>
+        <input type="text" name="max_delay" value="30000">
+      </div>
+      <div class="form-section">
+        <label class="form-label">Attempts</label>
+        <input type="text" name="attempts" value="0">
+      </div>
+    </div>
+     -->
+    <!-- Save Button -->
+    <button type="submit" class="save-btn">Save</button>
+  </form>
+</div>
+{% endblock %}

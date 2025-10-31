@@ -234,6 +234,77 @@
             </div>
             {% endfor %}
         </div>
+        {% elif connector.connector_type == "snmp" %}
+        <div class="mb-3">
+  <label class="form-label" for="community">SNMP Community</label>
+  <input type="text" class="form-control" id="community" name="community" value="{{ connector.configuration|default_if_none:'public' }}" placeholder="Enter SNMP Community">
+</div>
+
+<div class="mb-4 h5">Devices</div>
+<div id="deviceList">
+  {% for device in devices %}
+  <div class="mb-3 device-item" id="device-{{ forloop.counter0 }}">
+    <input type="hidden" name="devices-{{ forloop.counter0 }}-id" value="{{ device.id }}">
+
+    <div class="device-header" onclick="toggleDeviceBody(this);">
+      <h5>{{ device.device_name }} (IP: {{ device.device_ip }} Port: {{ device.device_port }})</h5>
+      <span class="arrow">&#9654;</span>
+    </div>
+    <div class="device-body" style="display:none; padding-left: 20px;">
+      <div class="mb-2">
+        <label>Device Name</label>
+        <input type="text" class="form-control" name="devices-{{ forloop.counter0 }}-name" value="{{ device.device_name }}">
+      </div>
+      <div class="mb-2">
+        <label>Device IP</label>
+        <input type="text" class="form-control" name="devices-{{ forloop.counter0 }}-ip" value="{{ device.device_ip }}">
+      </div>
+      <div class="mb-2">
+        <label>Device Port</label>
+        <input type="number" class="form-control" name="devices-{{ forloop.counter0 }}-port" value="{{ device.device_port }}">
+      </div>
+
+      <label>OIDs for this device:</label>
+      <div id="oidList-{{ forloop.counter0 }}">
+        {% for ts in device.snmp_timeseries.all %}
+        <div class="row g-2 align-items-center mb-2 oid-item">
+          <div class="col">
+            <input type="text" class="form-control" name="devices-{{ forloop.parentloop.counter0 }}-oids-{{ forloop.counter0 }}-key" placeholder="Key" value="{{ ts.name }}">
+          </div>
+          <div class="col">
+            <select class="form-select" name="devices-{{ forloop.parentloop.counter0 }}-oids-{{ forloop.counter0 }}-type">
+              <option {% if ts.datatype == 'STRING' %}selected{% endif %}>STRING</option>
+              <option {% if ts.datatype == 'INTEGER' %}selected{% endif %}>INTEGER</option>
+              <option {% if ts.datatype == 'COUNTER32' %}selected{% endif %}>COUNTER32</option>
+              <option {% if ts.datatype == 'GAUGE32' %}selected{% endif %}>GAUGE32</option>
+              <option {% if ts.datatype == 'TIME_TICKS' %}selected{% endif %}>TIME_TICKS</option>
+              <option {% if ts.datatype == 'TABLE' %}selected{% endif %}>TABLE</option>
+            </select>
+          </div>
+          <div class="col">
+            <input type="text" class="form-control" name="devices-{{ forloop.parentloop.counter0 }}-oids-{{ forloop.counter0 }}-oid" placeholder="OID" value="{{ ts.address }}">
+          </div>
+          <div class="col">
+            <select class="form-select" name="devices-{{ forloop.parentloop.counter0 }}-oids-{{ forloop.counter0 }}-method">
+              <option {% if ts.method == 'GET' %}selected{% endif %}>GET</option>
+              <option {% if ts.method == 'WALK' %}selected{% endif %}>WALK</option>
+              <option {% if ts.method == 'BULK' %}selected{% endif %}>BULK</option>              
+              
+            </select>
+          </div>
+          <div class="col-auto">
+            <button type="button" class="btn btn-danger btn-sm" onclick="removeOid(this)">Remove</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn btn-primary btn-sm mt-2" onclick="addOid({{ forloop.counter0 }})">Add OID</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<button type="button" class="btn btn-success mt-3" onclick="addDevice()">Add New Device</button>
+
         {% elif connector.connector_type == 'mqtt'  %}
         <!-- MQTT Configuration -->
             <div class="mb-3">
@@ -719,5 +790,101 @@ function addTimeseriesRow(deviceIndex) {
     dataTypeSelect.selectedIndex = 0;
 }
 </script>
+
+{% elif connector.connector_type == 'snmp' %}
+<script>
+let deviceCount = {{ devices|length }};
+function toggleDeviceBody(elem) {
+  const body = elem.nextElementSibling;
+  const arrow = elem.querySelector('.arrow');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    arrow.innerHTML = '&#9660;';
+  } else {
+    body.style.display = 'none';
+    arrow.innerHTML = '&#9654;';
+  }
+}
+
+function addDevice() {
+  const deviceList = document.getElementById('deviceList');
+  const deviceIndex = deviceCount++;
+  
+  const deviceDiv = document.createElement('div');
+  deviceDiv.className = 'mb-3 device-item';
+  deviceDiv.id = 'device-' + deviceIndex;
+  deviceDiv.innerHTML = `
+    <input type="hidden" name="devices-${deviceIndex}-id" value="">
+    <div class="device-header" onclick="toggleDeviceBody(this);">
+      <h5>New Device ${deviceIndex + 1} (IP: 0.0.0.0 Port: 161)</h5>
+      <span class="arrow">&#9654;</span>
+    </div>
+    <div class="device-body" style="display:none; padding-left: 20px;">
+      <div class="mb-2">
+        <label>Device Name</label>
+        <input type="text" class="form-control" name="devices-${deviceIndex}-name" value="">
+      </div>
+      <div class="mb-2">
+        <label>Device IP</label>
+        <input type="text" class="form-control" name="devices-${deviceIndex}-ip" value="">
+      </div>
+      <div class="mb-2">
+        <label>Device Port</label>
+        <input type="number" class="form-control" name="devices-${deviceIndex}-port" value="161">
+      </div>
+      <label>OIDs for this device:</label>
+      <div id="oidList-${deviceIndex}"></div>
+      <button type="button" class="btn btn-primary btn-sm mt-2" onclick="addOid(${deviceIndex})">Add OID</button>
+    </div>
+  `;
+
+  deviceList.appendChild(deviceDiv);
+}
+
+function addOid(deviceIndex) {
+  const oidList = document.getElementById('oidList-' + deviceIndex);
+  const oidCount = oidList.children.length;
+
+  const row = document.createElement('div');
+  row.className = 'row g-2 align-items-center mb-2 oid-item';
+  row.innerHTML = `
+    <div class="col">
+      <input type="text" class="form-control" name="devices-${deviceIndex}-oids-${oidCount}-key" placeholder="Key">
+    </div>
+    <div class="col">
+      <select class="form-select" name="devices-${deviceIndex}-oids-${oidCount}-type">
+        <option>STRING</option>
+        <option>INTEGER</option>
+        <option>COUNTER32</option>
+        <option>GAUGE32</option>
+        <option>TIME_TICKS</option>
+        <option>TABLE</option>
+      </select>
+    </div>
+    <div class="col">
+      <input type="text" class="form-control" name="devices-${deviceIndex}-oids-${oidCount}-oid" placeholder="OID">
+    </div>
+    <div class="col">
+      <select class="form-select" name="devices-${deviceIndex}-oids-${oidCount}-method">
+        <option>GET</option>
+        <option>WALK</option>
+        <option>BULK</option>
+       
+      </select>
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-danger btn-sm" onclick="removeOid(this)">Remove</button>
+    </div>
+  `;
+  oidList.appendChild(row);
+}
+
+function removeOid(btn) {
+  btn.closest('.oid-item').remove();
+}
+</script>
+
+
 {% endif %}
+
 {% endblock %}

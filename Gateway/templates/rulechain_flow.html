@@ -1,0 +1,488 @@
+{% extends "base.html" %}
+{% block title %}{{ gateway.name }}Rulechain Flow{% endblock %}
+
+{% block content %}
+  
+  <style>
+body {
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  background: #f5f7fa;
+  color: #18233a;
+  margin: 0;
+}
+.container {
+  display: flex;
+  min-height: 94vh;
+  gap: 20px;
+  padding: 32px 32px 0 32px;
+}
+.flow-panel {
+  width: 270px;
+  background: #ffffff;
+  border-radius: 15px;
+  border: 1px solid #eaeff7;
+  padding: 20px 10px;
+  box-shadow: 0 8px 28px -8px #3566bf2b;
+  font-size: 15px;
+  overflow-y: auto;
+}
+.node-category {
+  cursor: pointer;
+  font-weight: 700;
+  color: #3566bf;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 7px;
+  margin-top: 8px;
+  transition: background 0.2s;
+}
+.node-category:hover {
+  background: #f0f7ff;
+}
+.node-list {
+  padding-left: 14px;
+  margin-bottom: 18px;
+}
+.node-btn {
+  display: block;
+  background: #f0f7ff;
+  border: 1px solid #b7c4df;
+  border-radius: 9px;
+  margin: 10px auto;
+  padding: 11px 0;
+  font-weight: 600;
+  color: #294a72;
+  cursor: grab;
+  user-select: none;
+  width: 92%;
+  transition: background 0.25s, transform 0.20s;
+  box-shadow: 0 3px 8px #dbe4ef3a;
+}
+.node-btn:active {
+  cursor: grabbing;
+  background: #d5e3fa;
+  transform: scale(1.07);
+}
+#canvas {
+  flex-grow: 1;
+  background: #fafdff;
+  border-radius: 16px;
+  border: 1px solid #dde4ed;
+  position: relative;
+  box-shadow: 0 16px 36px -12px #2563eb23;
+  min-height: 94vh;
+  overflow: hidden;
+}
+/* Node styles */
+.rule-node {
+  position: absolute;
+  border-radius: 13px;
+  background: #fff;
+  border: 3px solid #b8d1fe;
+  box-shadow: 0 8px 24px -12px #26579388;
+  width: 155px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.09rem;
+  color: #294669;
+  cursor: grab;
+  transition: border-color 0.18s, transform 0.12s;
+  z-index: 10;
+}
+.rule-node.selected-node {
+  border-color: #2563eb;
+  background: #f1f7ff;
+  box-shadow: 0 0 0 9px #2563eb17;
+}
+.rule-node:hover {
+  box-shadow: 0 18px 38px -14px #2563eb88;
+  transform: translateY(-3px) scale(1.025);
+}
+/* Connection styles */
+.svg-connection {
+  position: absolute;
+  left: 0; top: 0;
+  pointer-events: none;
+}
+.connection-line {
+  stroke: #2563eb;
+  stroke-width: 3.2;
+  fill: none;
+  cursor: pointer;
+  pointer-events: stroke;
+  transition: stroke 0.18s;
+}
+.connection-line.selected-connection {
+  stroke: #f44826;
+  stroke-width: 4.7;
+  filter: drop-shadow(0 0 5px #f4482675);
+}
+.dot {
+  fill: #75bbfa;
+  stroke: #2563eb;
+  stroke-width: 2;
+  transition: fill 0.20s;
+}
+.dot:hover {
+  fill: #2563eb;
+  filter: brightness(120%);
+}
+/* Action icons */
+.node-action-icons, .connection-action-icons {
+  display: flex;
+  position: absolute;
+  z-index: 20;
+  background: transparent;
+  align-items: center;
+  gap: 15px;
+  padding-left: 3px;
+}
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 2px 8px #2563eb55;
+  transition: background-color 0.16s, transform 0.17s;
+}
+.icon-btn.edit {
+  background: #ffc107;
+}
+.icon-btn.delete {
+  background: #ff4e42;
+}
+.icon-btn:hover {
+  transform: scale(1.11);
+  filter: brightness(117%);
+}
+.flow-panel::-webkit-scrollbar {
+  width: 8px;
+}
+.flow-panel::-webkit-scrollbar-track {
+  background: #f0f7ff;
+}
+.flow-panel::-webkit-scrollbar-thumb {
+  background: #b8d1fe;
+  border-radius: 7px;
+}
+
+
+
+  </style>
+
+<body>
+  <h2>Rule chain Flow </h2>
+  <div class="container">
+ <div class="flow-panel" style="width:200px; border:1px solid #ccc;">
+  <button class="node-category" onclick="toggleCat('cat-src')">▼ Data Sources</button>
+  <div class="node-list" id="cat-src">
+    <button class="node-btn" draggable="true" data-type="MQTT">MQTT</button>
+    <button class="node-btn" draggable="true" data-type="Modbus">Modbus</button>
+    
+  </div>
+
+  <button class="node-category" onclick="toggleCat('cat-proc')">▼ Data Processing</button>
+  <div class="node-list" id="cat-proc" style="display:none;">
+    <button class="node-btn" draggable="true" data-type="Round">Round</button>
+    <button class="node-btn" draggable="true" data-type="ToJSON">To JSON</button>
+    <button class="node-btn" draggable="true" data-type="ParseJSON">Parse JSON</button>
+    <button class="node-btn" draggable="true" data-type="IsNull">IsNull</button>
+    <button class="node-btn" draggable="true" data-type="Delay">Delay</button>
+  </div>
+
+  <button class="node-category" onclick="toggleCat('cat-agg')">▼ Aggregate Data</button>
+  <div class="node-list" id="cat-agg" style="display:none;">
+    
+    <button class="node-btn" draggable="true" data-type="Average">Average</button>
+    <button class="node-btn" draggable="true" data-type="Count">Count</button>
+    <button class="node-btn" draggable="true" data-type="Maximum">Maximum</button>
+    <button class="node-btn" draggable="true" data-type="Minimum">Minimum</button>
+    <button class="node-btn" draggable="true" data-type="Sum">Sum</button>
+  </div>
+
+  <button class="node-category" onclick="toggleCat('cat-ops')">▼ Operators</button>
+  <div class="node-list" id="cat-ops" style="display:none;">
+    <button class="node-btn" draggable="true" data-type="Filter">Filter</button>
+    <button class="node-btn" draggable="true" data-type="GroupBy">Group By</button>
+    <button class="node-btn" draggable="true" data-type="Join">Join</button>
+    <button class="node-btn" draggable="true" data-type="Window">Window</button>
+  </div>
+
+  <button class="node-category" onclick="toggleCat('cat-trans')">▼ Transport & Storage</button>
+  <div class="node-list" id="cat-trans" style="display:none;">
+    <button class="node-btn" draggable="true" data-type="Rest">Rest</button>
+    <button class="node-btn" draggable="true" data-type="MQTT">MQTT</button>
+    <button class="node-btn" draggable="true" data-type="File">File</button>
+    
+  </div>
+</div>
+
+
+
+    <div id="canvas"></div>
+  </div>
+
+  <div id="node-action-icons" class="node-action-icons" style="display:none;">
+    <button class="icon-btn edit" title="Edit">&#9998;</button>
+    <button class="icon-btn delete" title="Delete">&times;</button>
+  </div>
+  <div id="connection-action-icons" class="connection-action-icons" style="display:none;">
+    <button class="icon-btn edit" title="Edit">&#9998;</button>
+    <button class="icon-btn delete" title="Delete">&times;</button>
+  </div>
+
+  <svg width="0" height="0">
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="10" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L10,3 L0,6" fill="#ff2e2e"/>
+      </marker>
+    </defs>
+  </svg>
+<button id="save-flow-btn" style="position: fixed; top: 16px; right: 20px; z-index: 50; padding: 8px 16px; background:#2563eb; color:#fff; border:none; border-radius: 6px; cursor: pointer;">
+  Save Flow
+</button>
+
+  <script>
+    // MODEL
+     let nodes = JSON.parse('{{ nodes_json|escapejs }}');
+  let edges = JSON.parse('{{ edges_json|escapejs }}');
+
+  let selectedNodeId = null;
+  let selectedEdgeIdx = null;
+  let connectFromNodeId = null;
+  let draggedNodeType = null;
+
+    const canvas = document.getElementById('canvas');
+    const nodeIcons = document.getElementById('node-action-icons');
+    const connIcons = document.getElementById('connection-action-icons');
+
+    // --- Drag new nodes from palette ---
+    document.querySelectorAll('.node-btn').forEach(btn => {
+      btn.addEventListener('dragstart', e => {
+        draggedNodeType = btn.getAttribute('data-type');
+      });
+    });
+    document.getElementById('save-flow-btn').addEventListener('click', () => {
+  // Prepare payload
+  const payload = {
+    nodes: nodes,
+    edges: edges,
+  };
+
+  fetch("{% url 'save_rulechain' gateway.id %}", {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': '{{ csrf_token }}',
+    },
+    body: JSON.stringify(payload),
+  })
+  .then(resp => resp.json())
+  .then(data => {
+    if (data.success) {
+      alert('Flow saved successfully!');
+    } else {
+      alert('Failed to save flow.');
+    }
+  })
+  .catch(err => {
+    console.error(err);
+    alert('Error saving flow.');
+  });
+});
+
+    function toggleCat(catId) {
+    const catDiv = document.getElementById(catId);
+    if (catDiv.style.display === 'none') {
+      catDiv.style.display = 'block';
+    } else {
+      catDiv.style.display = 'none';
+    }
+  }
+    canvas.addEventListener('dragover', e => e.preventDefault());
+    canvas.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!draggedNodeType) return;
+      const rect = canvas.getBoundingClientRect();
+      addNode(draggedNodeType, e.clientX - rect.left - 60, e.clientY - rect.top - 25);
+      draggedNodeType = null;
+    });
+
+    // --- Draw everything ---
+    function renderCanvas() {
+      canvas.innerHTML = '';
+      // Draw connections first
+      nodes.forEach(node => {
+        drawNodeDot(node.x, node.y + 25); // left
+        drawNodeDot(node.x + 120, node.y + 25); // right
+      });
+      edges.forEach((edge, idx) => drawEdge(edge, idx));
+      nodes.forEach(node => drawNode(node));
+      // Action icons
+      positionNodeIcons();
+      positionConnIcons();
+    }
+    function drawNodeDot(x, y) {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      dot.setAttribute('width', 12);
+      dot.setAttribute('height', 12);
+      dot.style.position = 'absolute';
+      dot.style.left = (x - 6) + 'px';
+      dot.style.top = (y - 6) + 'px';
+      dot.innerHTML = '<circle cx="6" cy="6" r="5" class="dot"/>';
+      canvas.appendChild(dot);
+    }
+    function drawEdge(edge, idx) {
+      const fromNode = nodes.find(n => n.id === edge.from);
+      const toNode = nodes.find(n => n.id === edge.to);
+      if (!fromNode || !toNode) return;
+      const x1 = fromNode.x + 120, y1 = fromNode.y + 25;
+      const x2 = toNode.x, y2 = toNode.y + 25;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.classList.add('svg-connection');
+      svg.style.left = '0';
+      svg.style.top = '0';
+      svg.setAttribute('width', canvas.offsetWidth);
+      svg.setAttribute('height', canvas.offsetHeight);
+
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1);
+      line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2);
+      line.setAttribute('y2', y2);
+      line.setAttribute('class', 'connection-line' + (selectedEdgeIdx === idx ? ' selected-connection' : ''));
+      line.setAttribute('marker-end', 'url(#arrow)');
+      line.style.pointerEvents = 'stroke';
+      line.addEventListener('click', e => {
+        e.stopPropagation();
+        selectedEdgeIdx = idx;
+        selectedNodeId = null;
+        renderCanvas();
+      });
+      svg.appendChild(line);
+      canvas.appendChild(svg);
+    }
+    function drawNode(node) {
+      const div = document.createElement('div');
+      div.className = 'rule-node';
+      if (selectedNodeId === node.id) div.classList.add('selected-node');
+      div.setAttribute('data-id', node.id);
+      div.style.left = node.x + 'px';
+      div.style.top = node.y + 'px';
+      div.innerHTML = node.label;
+      div.draggable = true;
+      // Drag within canvas
+      div.addEventListener('dragstart', nodeDragStart);
+      div.addEventListener('dragend', nodeDragEnd);
+      // Connect by click
+      div.addEventListener('click', e => {
+        e.stopPropagation();
+        if (connectFromNodeId === null) {
+          connectFromNodeId = node.id;
+          div.style.borderColor = '#29b6f6';
+        } else if (connectFromNodeId !== node.id) {
+          addEdge(connectFromNodeId, node.id);
+          connectFromNodeId = null;
+        }
+        selectedNodeId = node.id;
+        selectedEdgeIdx = null;
+        renderCanvas();
+      });
+      canvas.appendChild(div);
+    }
+
+    // --- Node drag handlers ---
+    let dragNodeId = null;
+    function nodeDragStart(e) {
+      dragNodeId = Number(e.target.getAttribute('data-id'));
+    }
+    function nodeDragEnd(e) {
+      if (dragNodeId !== null) {
+        const rect = canvas.getBoundingClientRect();
+        const node = nodes.find(n => n.id === dragNodeId);
+        node.x = e.clientX - rect.left - 60;
+        node.y = e.clientY - rect.top - 25;
+        dragNodeId = null;
+        renderCanvas();
+      }
+    }
+
+    // --- Actions ---
+    function addNode(type, x, y) {
+      const id = nodes.length ? Math.max(...nodes.map(n=>n.id))+1 : 1;
+      nodes.push({ id, type, x, y, label: type });
+      renderCanvas();
+    }
+    function addEdge(from, to) {
+      if (!edges.some(e => e.from === from && e.to === to)) {
+        edges.push({ from, to });
+        renderCanvas();
+      }
+    }
+
+    // --- Icon overlays ---
+    function positionNodeIcons() {
+      nodeIcons.style.display = 'none';
+      if (selectedNodeId !== null) {
+        const node = nodes.find(n => n.id === selectedNodeId);
+        if (!node) return;
+        nodeIcons.style.display = 'flex';
+        nodeIcons.style.left = (node.x + 98) + 'px';
+        nodeIcons.style.top = (node.y - 18) + 'px';
+      }
+    }
+    function positionConnIcons() {
+      connIcons.style.display = 'none';
+      if (selectedEdgeIdx !== null) {
+        const edge = edges[selectedEdgeIdx];
+        const fromNode = nodes.find(n => n.id === edge.from);
+        const toNode = nodes.find(n => n.id === edge.to);
+        if (!fromNode || !toNode) return;
+        connIcons.style.display = 'flex';
+        connIcons.style.left = ((fromNode.x + 120 + toNode.x) / 2 - 11) + 'px';
+        connIcons.style.top = ((fromNode.y + 25 + toNode.y +25) / 2 - 16) + 'px';
+      }
+    }
+
+    // --- Node/connection icon events ---
+    nodeIcons.children[0].onclick = function() { alert("Edit node " + selectedNodeId); };
+    nodeIcons.children[1].onclick = function() {
+      if (selectedNodeId !== null) {
+        nodes = nodes.filter(n => n.id !== selectedNodeId);
+        edges = edges.filter(e => e.from !== selectedNodeId && e.to !== selectedNodeId);
+        selectedNodeId = null;
+        renderCanvas();
+      }
+    };
+    connIcons.children[0].onclick = function() { alert("Edit connection"); };
+    connIcons.children[1].onclick = function() {
+      if (selectedEdgeIdx !== null) {
+        edges.splice(selectedEdgeIdx, 1);
+        selectedEdgeIdx = null;
+        renderCanvas();
+      }
+    };
+
+    // --- Background click deselect ---
+    canvas.addEventListener('click', e => {
+      connectFromNodeId = null;
+      selectedNodeId = null;
+      selectedEdgeIdx = null;
+      renderCanvas();
+    });
+
+    renderCanvas();
+  </script>
+</body>
+{% endblock %}
