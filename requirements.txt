@@ -9,4 +9,5 @@ openleadr
 ocpp
 websockets
 pysnmp
+pyOpenSSL>=20.0.1
 
